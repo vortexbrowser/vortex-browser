@@ -2292,42 +2292,85 @@ document.getElementById('btnDevtoolsDetach')?.addEventListener('click', async ()
   }
 });
 
-// Abre o DevTools oficial do Chromium com Elements, Console, Network e Sources
+// Abre o DevTools oficial do Chromium acoplado à direita na mesma janela (estilo Chrome)
 async function openDockedDevTools(targetWv, inspectX, inspectY) {
   const cur = getActiveTab();
   const wv = targetWv || cur?.webview;
   if (!wv) return;
 
-  // Garante que o container dummy antigo não fique aberto atrapalhando
+  const targetWcId = wv.getWebContentsId ? wv.getWebContentsId() : null;
+
+  // Abre o painel lateral embutido no navegador
   if (devtoolsDockContainerEl) {
-    devtoolsDockContainerEl.classList.remove('open');
+    devtoolsDockContainerEl.classList.add('open');
+  }
+  isDevToolsDockOpen = true;
+  if (targetWcId) devToolsCurrentTargetWcId = targetWcId;
+
+  // Obtém o WebContents ID do webview do dock lateral
+  let devtoolsWcId = null;
+  if (devtoolsDockWebviewEl) {
+    try {
+      if (typeof devtoolsDockWebviewEl.getWebContentsId === 'function') {
+        devtoolsWcId = devtoolsDockWebviewEl.getWebContentsId();
+      }
+    } catch (e) {}
+
+    if (!devtoolsWcId) {
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, 300);
+        devtoolsDockWebviewEl.addEventListener('dom-ready', () => {
+          clearTimeout(timer);
+          resolve();
+        }, { once: true });
+      });
+      try {
+        if (typeof devtoolsDockWebviewEl.getWebContentsId === 'function') {
+          devtoolsWcId = devtoolsDockWebviewEl.getWebContentsId();
+        }
+      } catch (e) {}
+    }
   }
 
-  try {
-    const targetWcId = wv.getWebContentsId ? wv.getWebContentsId() : null;
+  // Acopla o DevTools dentro do painel lateral via setDevToolsWebContents
+  if (targetWcId && window.vortexAPI?.dockDevTools) {
+    try {
+      const res = await window.vortexAPI.dockDevTools({
+        targetWebContentsId: targetWcId,
+        devtoolsWebContentsId: devtoolsWcId,
+        x: inspectX,
+        y: inspectY
+      });
+      if (res && res.success) {
+        if (typeof inspectX === 'number' && typeof inspectY === 'number' && typeof wv.inspectElement === 'function') {
+          setTimeout(() => {
+            try { wv.inspectElement(Math.round(inspectX), Math.round(inspectY)); } catch(e) {}
+          }, 150);
+        }
+        return;
+      }
+    } catch (e) {
+      console.warn('Erro ao acoplar DevTools via dockDevTools:', e);
+    }
+  }
 
-    if (typeof inspectX === 'number' && typeof inspectY === 'number') {
-      const px = Math.max(0, Math.round(inspectX));
-      const py = Math.max(0, Math.round(inspectY));
-      if (typeof wv.inspectElement === 'function') {
-        wv.inspectElement(px, py);
-      } else if (targetWcId && window.vortexAPI?.openDevTools) {
-        await window.vortexAPI.openDevTools({ targetWebContentsId: targetWcId, mode: 'right', x: px, y: py });
-      }
-    } else {
-      if (typeof wv.openDevTools === 'function') {
-        wv.openDevTools({ mode: 'right' });
-      } else if (targetWcId && window.vortexAPI?.openDevTools) {
-        await window.vortexAPI.openDevTools({ targetWebContentsId: targetWcId, mode: 'right' });
-      }
+  // Fallback
+  try {
+    if (typeof inspectX === 'number' && typeof inspectY === 'number' && typeof wv.inspectElement === 'function') {
+      wv.inspectElement(Math.round(inspectX), Math.round(inspectY));
+    } else if (typeof wv.openDevTools === 'function') {
+      wv.openDevTools();
     }
   } catch (err) {
-    console.error('Erro ao abrir DevTools nativo:', err);
+    console.error('Erro no fallback do DevTools:', err);
   }
 }
 
 // Fecha o DevTools
 async function closeDockedDevTools(targetWv) {
+  isDevToolsDockOpen = false;
+
+  // Fecha o painel lateral embutido
   if (devtoolsDockContainerEl) {
     devtoolsDockContainerEl.classList.remove('open');
   }
@@ -2345,6 +2388,10 @@ async function closeDockedDevTools(targetWv) {
       }
     } catch(e) {}
   }
+  if (devToolsCurrentTargetWcId && window.vortexAPI?.closeDevTools) {
+    try { await window.vortexAPI.closeDevTools({ targetWebContentsId: devToolsCurrentTargetWcId }); } catch(e) {}
+    devToolsCurrentTargetWcId = null;
+  }
 }
 
 // Função global para a paleta de comandos e ações do usuário
@@ -2359,12 +2406,19 @@ async function toggleDockedDevTools(targetWv) {
   const wv = targetWv || cur?.webview;
   if (!wv) return;
 
-  let isOpen = false;
-  try {
-    if (typeof wv.isDevToolsOpened === 'function') {
-      isOpen = wv.isDevToolsOpened();
-    }
-  } catch(e) {}
+  const targetWcId = wv.getWebContentsId ? wv.getWebContentsId() : null;
+  let isOpen = isDevToolsDockOpen || (devtoolsDockContainerEl && devtoolsDockContainerEl.classList.contains('open'));
+
+  if (targetWcId && window.vortexAPI?.isDevToolsOpen) {
+    try {
+      const res = await window.vortexAPI.isDevToolsOpen({ targetWebContentsId: targetWcId });
+      if (res && typeof res.open === 'boolean') {
+        isOpen = isOpen || res.open;
+      }
+    } catch(e) {}
+  } else if (typeof wv.isDevToolsOpened === 'function') {
+    isOpen = isOpen || wv.isDevToolsOpened();
+  }
 
   if (isOpen) {
     await closeDockedDevTools(wv);
