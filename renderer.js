@@ -2312,13 +2312,13 @@ async function openDockedDevTools(targetWv, inspectX, inspectY) {
       if (typeof wv.inspectElement === 'function') {
         wv.inspectElement(px, py);
       } else if (targetWcId && window.vortexAPI?.openDevTools) {
-        await window.vortexAPI.openDevTools({ targetWebContentsId: targetWcId, mode: 'detach', x: px, y: py });
+        await window.vortexAPI.openDevTools({ targetWebContentsId: targetWcId, mode: 'right', x: px, y: py });
       }
     } else {
       if (typeof wv.openDevTools === 'function') {
-        wv.openDevTools({ mode: 'detach' });
+        wv.openDevTools({ mode: 'right' });
       } else if (targetWcId && window.vortexAPI?.openDevTools) {
-        await window.vortexAPI.openDevTools({ targetWebContentsId: targetWcId, mode: 'detach' });
+        await window.vortexAPI.openDevTools({ targetWebContentsId: targetWcId, mode: 'right' });
       }
     }
   } catch (err) {
@@ -2345,6 +2345,12 @@ async function closeDockedDevTools(targetWv) {
       }
     } catch(e) {}
   }
+}
+
+// Função global para a paleta de comandos e ações do usuário
+function openDevToolsAction() {
+  const cur = getActiveTab();
+  if (cur && cur.webview) toggleDockedDevTools(cur.webview);
 }
 
 // Alterna o DevTools (abre se fechado, fecha se aberto)
@@ -2441,7 +2447,7 @@ window.addEventListener('keydown', (e) => {
   }
   else if (e.ctrlKey && e.key.toLowerCase() === 'l') { e.preventDefault(); addressInputEl.select(); }
   else if (e.ctrlKey && e.key.toLowerCase() === 'n') { e.preventDefault(); window.vortexAPI.openNewWindow(); }
-  else if (e.key === 'F12') { e.preventDefault(); const cur = getActiveTab(); if (cur && cur.webview) toggleDockedDevTools(cur.webview); }
+  else if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'i' || e.keyCode === 73))) { e.preventDefault(); const cur = getActiveTab(); if (cur && cur.webview) toggleDockedDevTools(cur.webview); }
   else if (e.ctrlKey && e.key.toLowerCase() === 'r') { e.preventDefault(); const cur = getActiveTab(); if (cur && cur.webview) cur.webview.reload(); }
   else if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'delete') { e.preventDefault(); window.vortexAPI.clearBrowsingData(); }
   else if (e.ctrlKey && e.key.toLowerCase() === 'f') { e.preventDefault(); openFindBar(); }
