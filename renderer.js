@@ -228,6 +228,64 @@ function respondCurrentPermission(allow) {
 btnPermissionBlock?.addEventListener('click', () => respondCurrentPermission(false));
 btnPermissionAllow?.addEventListener('click', () => respondCurrentPermission(true));
 
+// ── Popup de Notificação de Cookies do Site estilo Google Chrome ──
+const cookiePromptPopup = document.getElementById('cookiePromptPopup');
+const cookiePromptDomain = document.getElementById('cookiePromptDomain');
+const btnCookiePromptAccept = document.getElementById('btnCookiePromptAccept');
+const btnCookiePromptManage = document.getElementById('btnCookiePromptManage');
+
+function showCookieConsentPrompt(domain) {
+  if (!cookiePromptPopup || !domain) return;
+  const consentedDomains = JSON.parse(localStorage.getItem('vortex-cookie-consented-domains') || '{}');
+  if (consentedDomains[domain]) return; // Já foi consentido
+
+  if (cookiePromptDomain) cookiePromptDomain.innerText = domain;
+  cookiePromptPopup.classList.add('open');
+}
+
+function closeCookieConsentPrompt() {
+  if (cookiePromptPopup) cookiePromptPopup.classList.remove('open');
+}
+
+btnCookiePromptAccept?.addEventListener('click', () => {
+  const activeTab = getActiveTab();
+  if (activeTab && activeTab.url) {
+    try {
+      const domain = new URL(activeTab.url).hostname;
+      const consentedDomains = JSON.parse(localStorage.getItem('vortex-cookie-consented-domains') || '{}');
+      consentedDomains[domain] = true;
+      localStorage.setItem('vortex-cookie-consented-domains', JSON.stringify(consentedDomains));
+    } catch(e) {}
+  }
+
+  // Clica no banner do site automaticamente caso haja um aberto na página
+  if (activeTab && activeTab.webview && activeTab.webview.executeJavaScript) {
+    activeTab.webview.executeJavaScript(`
+      (function() {
+        const acceptKeywords = ['aceitar todos', 'aceitar cookies', 'aceitar tudo', 'concordar e fechar', 'concordo', 'permitir todos', 'permitir cookies', 'aceito', 'accept all', 'accept cookies', 'agree', 'allow all', 'i agree'];
+        const btns = Array.from(document.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"]'));
+        for (const b of btns) {
+          const t = (b.innerText || b.value || b.getAttribute('aria-label') || '').toLowerCase().trim();
+          if (acceptKeywords.some(k => t === k || t.includes(k))) {
+            b.click();
+            return;
+          }
+        }
+      })();
+    `).catch(() => {});
+  }
+
+  closeCookieConsentPrompt();
+  showToastNotification('🍪', 'Cookies Aceitos', 'Sua preferência foi salva para este site.');
+});
+
+btnCookiePromptManage?.addEventListener('click', () => {
+  closeCookieConsentPrompt();
+  if (securityModalEl) {
+    securityModalEl.style.display = 'flex';
+  }
+});
+
 // ── Modal de Limpar Histórico e Cookies estilo Google Chrome ────────
 const chromeClearDataModal = document.getElementById('chromeClearDataModal');
 const btnCloseChromeClearModal = document.getElementById('btnCloseChromeClearModal');
@@ -1222,6 +1280,7 @@ function createWebview(id, url) {
         updateSecurityBadge(e.url);
         updateNavButtons();
         updateStarState(e.url);
+        closeCookieConsentPrompt();
       }
       addToHistory(e.url, t.title);
 
@@ -1462,55 +1521,62 @@ function createWebview(id, url) {
       }
     } catch(e) {}
 
-    // 5. Assistente Inteligente de Consentimento de Cookies da Página (Auto-Consent LGPD/GDPR)
+    // 5. Assistente Inteligente de Detecção e Notificação de Cookies (Estilo Google Chrome)
     try {
-      const s = JSON.parse(localStorage.getItem('vortex-settings') || '{}');
-      if (s.autoAcceptBanners !== false) {
-        wv.executeJavaScript(`
-          (function() {
-            try {
-              if (window.__vortexCookieHandled) return;
-              const acceptKeywords = [
-                'aceitar todos', 'aceitar cookies', 'aceitar tudo', 'concordar e fechar', 
-                'concordo', 'permitir todos', 'permitir cookies', 'aceito', 'prossegue',
-                'accept all', 'accept cookies', 'agree', 'allow all', 'i agree', 'got it', 'understand'
-              ];
-              const popularSelectors = [
-                '#onetrust-accept-btn-handler',
-                '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
-                '#CybotCookiebotDialogBodyButtonAccept',
-                '.cc-btn.cc-allow',
-                '.cookie-banner__accept',
-                '.js-accept-cookies',
-                'button[data-testid*="cookie-policy-manage-dialog-accept-button"]',
-                'button[id*="cookie-accept"]',
-                'button[class*="cookie-accept"]',
-                'button[aria-label*="Aceitar todos"]'
-              ];
-              for (const sel of popularSelectors) {
-                const btn = document.querySelector(sel);
-                if (btn && btn.offsetParent !== null) {
-                  btn.click();
-                  window.__vortexCookieHandled = true;
-                  return;
-                }
+      wv.executeJavaScript(`
+        (function() {
+          try {
+            if (window.__vortexCookieHandled) return;
+
+            const cookieKeywords = [
+              'cookie', 'cookies', 'lgpd', 'gdpr', 'privacidade', 'privacy', 'consent', 'termo'
+            ];
+            const acceptKeywords = [
+              'aceitar todos', 'aceitar cookies', 'aceitar tudo', 'concordar e fechar', 
+              'concordo', 'permitir todos', 'permitir cookies', 'aceito', 'prossegue',
+              'accept all', 'accept cookies', 'agree', 'allow all', 'i agree', 'got it', 'understand'
+            ];
+            const popularSelectors = [
+              '#onetrust-accept-btn-handler',
+              '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
+              '#CybotCookiebotDialogBodyButtonAccept',
+              '.cc-btn.cc-allow',
+              '.cookie-banner__accept',
+              '.js-accept-cookies',
+              'button[data-testid*="cookie-policy-manage-dialog-accept-button"]',
+              'button[id*="cookie-accept"]',
+              'button[class*="cookie-accept"]',
+              'button[aria-label*="Aceitar todos"]'
+            ];
+
+            let foundBanner = false;
+            for (const sel of popularSelectors) {
+              const btn = document.querySelector(sel);
+              if (btn && btn.offsetParent !== null) {
+                foundBanner = true;
+                break;
               }
-              const clickable = Array.from(document.querySelectorAll('button, a, [role="button"], input[type="button"], input[type="submit"]'));
-              for (const el of clickable) {
-                const text = (el.innerText || el.value || el.getAttribute('aria-label') || '').toLowerCase().trim();
-                if (acceptKeywords.some(kw => text === kw || text.includes(kw))) {
-                  const parent = el.closest('[id*="cookie"], [class*="cookie"], [id*="consent"], [class*="consent"], [id*="banner"], [class*="banner"], [id*="lgpd"], [class*="lgpd"]');
-                  if (parent || text.includes('cookie') || text.includes('concord')) {
-                    el.click();
-                    window.__vortexCookieHandled = true;
-                    return;
+            }
+
+            if (!foundBanner) {
+              const bannerContainers = document.querySelectorAll('[id*="cookie"], [class*="cookie"], [id*="consent"], [class*="consent"], [id*="banner"], [class*="banner"], [id*="lgpd"], [class*="lgpd"]');
+              for (const c of bannerContainers) {
+                if (c && c.offsetParent !== null && (c.innerText || '').length < 1500) {
+                  const text = (c.innerText || '').toLowerCase();
+                  if (cookieKeywords.some(k => text.includes(k))) {
+                    foundBanner = true;
+                    break;
                   }
                 }
               }
-            } catch(e) {}
-          })();
-        `).catch(() => {});
-      }
+            }
+
+            if (foundBanner) {
+              console.log('__VORTEX_COOKIE_BANNER_DETECTED__:' + window.location.hostname);
+            }
+          } catch(e) {}
+        })();
+      `).catch(() => {});
     } catch(e) {}
   });
 
@@ -1548,6 +1614,11 @@ function createWebview(id, url) {
         const currentUrl = wv.getURL ? wv.getURL() : url;
         promptSavePassword(currentUrl, payload.username, payload.password);
       } catch(err) {}
+    } else if (e.message && e.message.startsWith('__VORTEX_COOKIE_BANNER_DETECTED__:')) {
+      const bannerDomain = e.message.replace('__VORTEX_COOKIE_BANNER_DETECTED__:', '').trim();
+      if (activeTabId === id && bannerDomain) {
+        showCookieConsentPrompt(bannerDomain);
+      }
     }
   });
 
@@ -1652,6 +1723,7 @@ function switchTab(id) {
   });
   linkPreviewTooltipEl.style.display = 'none';
   closeFindBar();
+  closeCookieConsentPrompt();
   if (typeof closeDockedDevTools === 'function') {
     const cur = getActiveTab();
     if (cur && cur.webview) closeDockedDevTools(cur.webview);

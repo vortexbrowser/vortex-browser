@@ -3501,6 +3501,14 @@ body.incognito-active .address-bar-wrapper {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
 }
 
+.cookie-prompt-popup {
+  border-left: 3px solid #8ab4f8;
+}
+
+.cookie-icon-style {
+  background: rgba(234, 179, 8, 0.15) !important;
+}
+
 /* ═══════════════════════════════════════════════════════
    MODAL DE EXCLUIR HISTÓRICO E COOKIES (IGUAL CHROME)
    ═══════════════════════════════════════════════════════ */
