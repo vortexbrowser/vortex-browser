@@ -574,9 +574,21 @@ function showToastNotification(icon, title, desc, isError = false) {
 function isDownloadableUrl(url) {
   if (!url) return false;
   try {
+    const lower = url.toLowerCase();
+    // Identifica servlets e rotas de download do governo e portais legados (ex: DATASUS / CNES)
+    if (lower.includes('downloadservlet') || lower.includes('/downloadservlet') || lower.includes('download.asp') || lower.includes('download.php')) {
+      return true;
+    }
     const clean = url.split('?')[0].split('#')[0].toLowerCase();
-    const exts = ['.exe', '.msi', '.zip', '.rar', '.7z', '.tar', '.gz', '.dts', '.dbf', '.dbc', '.cnv', '.iso', '.bin', '.apk', '.dmg', '.rpm', '.deb'];
-    return exts.some(ext => clean.endsWith(ext));
+    const exts = ['.exe', '.msi', '.zip', '.rar', '.7z', '.tar', '.gz', '.dts', '.dbf', '.dbc', '.cnv', '.iso', '.bin', '.apk', '.dmg', '.rpm', '.deb', '.txt', '.csv', '.pdf'];
+    if (exts.some(ext => clean.endsWith(ext))) {
+      return true;
+    }
+    const query = url.split('?')[1]?.toLowerCase() || '';
+    if (exts.some(ext => query.includes(ext))) {
+      return true;
+    }
+    return false;
   } catch (e) {
     return false;
   }

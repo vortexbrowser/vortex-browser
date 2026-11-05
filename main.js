@@ -343,13 +343,26 @@ let adBlockStats = { blockedCount: 0, enabled: true };
 function isDownloadableUrl(url) {
   if (!url) return false;
   try {
+    const lower = url.toLowerCase();
+    // Identifica servlets e rotas de download do governo e portais legados (ex: DATASUS / CNES)
+    if (lower.includes('downloadservlet') || lower.includes('/downloadservlet') || lower.includes('download.asp') || lower.includes('download.php')) {
+      return true;
+    }
     const cleanUrl = url.split('?')[0].split('#')[0].toLowerCase();
     const downloadExtensions = [
       '.exe', '.msi', '.zip', '.rar', '.7z', '.tar', '.gz',
       '.dts', '.dbf', '.dbc', '.cnv', '.iso', '.bin', '.apk',
-      '.dmg', '.rpm', '.deb'
+      '.dmg', '.rpm', '.deb', '.txt', '.csv', '.pdf'
     ];
-    return downloadExtensions.some(ext => cleanUrl.endsWith(ext));
+    // Se o caminho do arquivo terminar com extensão ou se a query contiver arquivo compactado
+    if (downloadExtensions.some(ext => cleanUrl.endsWith(ext))) {
+      return true;
+    }
+    const query = url.split('?')[1]?.toLowerCase() || '';
+    if (downloadExtensions.some(ext => query.includes(ext))) {
+      return true;
+    }
+    return false;
   } catch (e) {
     return false;
   }
