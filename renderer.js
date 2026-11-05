@@ -616,14 +616,23 @@ function isDownloadableUrl(url) {
 let lastOpenedTabUrl = '';
 let lastOpenedTabTime = 0;
 
-window.vortexAPI.onOpenInNewTab((url) => {
+window.vortexAPI.onOpenInNewTab((data) => {
+  let url = '';
+  let partition = null;
+  if (typeof data === 'string') {
+    url = data;
+  } else if (data && typeof data === 'object') {
+    url = data.url;
+    partition = data.partition;
+  }
+
   if (url && typeof url === 'string') {
     const cleanUrl = url.trim();
     if (!cleanUrl || cleanUrl === 'about:blank' || cleanUrl === 'about:blank#') return;
     
-    // Evita duplicação em cascata de abertura da mesma URL dentro de 1 segundo
+    // Evita duplicação em cascata de abertura da mesma URL dentro de 800ms
     const now = Date.now();
-    if (cleanUrl === lastOpenedTabUrl && (now - lastOpenedTabTime) < 1000) {
+    if (cleanUrl === lastOpenedTabUrl && (now - lastOpenedTabTime) < 800) {
       return;
     }
     lastOpenedTabUrl = cleanUrl;
@@ -637,7 +646,11 @@ window.vortexAPI.onOpenInNewTab((url) => {
       window.vortexAPI.downloadUrl(cleanUrl);
       return;
     }
-    createTab(cleanUrl);
+    if (partition) {
+      createIncognitoTabWithPartition(partition, cleanUrl);
+    } else {
+      createTab(cleanUrl);
+    }
   }
 });
 
@@ -726,7 +739,20 @@ function setTabFaviconFromUrl(faviconEl, url, isIncognito = false) {
   } catch(e) {}
 }
 
+let lastCreatedIncognitoTabUrl = '';
+let lastCreatedIncognitoTabTime = 0;
+
 function createIncognitoTabWithPartition(partition, initialUrl) {
+  const now = Date.now();
+  if (initialUrl && typeof initialUrl === 'string') {
+    const clean = initialUrl.trim();
+    if (clean && clean === lastCreatedIncognitoTabUrl && (now - lastCreatedIncognitoTabTime) < 800) {
+      return;
+    }
+    lastCreatedIncognitoTabUrl = clean;
+    lastCreatedIncognitoTabTime = now;
+  }
+
   tabCounter++;
   const id = `tab-${tabCounter}`;
 
@@ -1216,7 +1242,20 @@ renderBookmarksBar();
 // ══════════════════════════════════════════
 // GERENCIAMENTO DE ABAS
 // ══════════════════════════════════════════
+let lastCreatedTabUrl = '';
+let lastCreatedTabTime = 0;
+
 function createTab(initialUrl = null) {
+  const now = Date.now();
+  if (initialUrl && typeof initialUrl === 'string') {
+    const clean = initialUrl.trim();
+    if (clean && clean === lastCreatedTabUrl && (now - lastCreatedTabTime) < 800) {
+      return;
+    }
+    lastCreatedTabUrl = clean;
+    lastCreatedTabTime = now;
+  }
+
   tabCounter++;
   const id = `tab-${tabCounter}`;
 

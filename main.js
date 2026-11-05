@@ -1973,13 +1973,6 @@ app.whenReady().then(() => {
         return { action: 'deny' };
       }
 
-      // Se o webContents for de um <webview> (aba do navegador),
-      // o próprio renderer.js escuta o evento 'new-window' do webview
-      // e gerencia abas normais ou anônimas e downloads sem duplicidade!
-      if (contents.getType() === 'webview') {
-        return { action: 'deny' };
-      }
-
       const targetWin = safeGetWindowFromWebContents(contents);
       if (url.startsWith('ftp://')) {
         downloadFtpUrl(url, targetWin);
@@ -1990,7 +1983,18 @@ app.whenReady().then(() => {
         return { action: 'deny' };
       }
       if (targetWin && !targetWin.isDestroyed()) {
-        targetWin.webContents.send('open-in-new-tab', url);
+        const isIncognito = contents.session && (
+          contents.session !== session.defaultSession ||
+          (contents.session.partition && contents.session.partition.startsWith('incognito-'))
+        );
+        if (isIncognito) {
+          targetWin.webContents.send('open-in-new-tab', {
+            url,
+            partition: contents.session.partition || ''
+          });
+        } else {
+          targetWin.webContents.send('open-in-new-tab', url);
+        }
       }
       return { action: 'deny' };
     });
