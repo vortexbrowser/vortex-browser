@@ -271,6 +271,17 @@ function broadcastToWindows(channel, data) {
   }
 }
 
+function safeGetWindowFromWebContents(wc) {
+  if (!wc) return getActiveWindow();
+  try {
+    if (typeof BrowserWindow.fromWebContents === 'function') {
+      const win = BrowserWindow.fromWebContents(wc);
+      if (win && !win.isDestroyed()) return win;
+    }
+  } catch (e) {}
+  return getActiveWindow();
+}
+
 function getActiveWindow() {
   return BrowserWindow.getFocusedWindow() || mainWindow || BrowserWindow.getAllWindows()[0] || null;
 }
@@ -644,14 +655,28 @@ function initDefaultSession() {
     const totalBytes = item.getTotalBytes();
     const downloadsDir = app.getPath('downloads');
     const defaultPath = path.join(downloadsDir, fileName);
-    const targetWin = BrowserWindow.fromWebContents(webContents) || getActiveWindow();
+    const targetWin = safeGetWindowFromWebContents(webContents);
 
     // Abre diálogo para o usuário escolher a pasta de destino e nome do arquivo (igual Chrome)
-    const chosenPath = dialog.showSaveDialogSync(targetWin, {
-      title: 'Salvar Arquivo Como',
-      defaultPath: defaultPath,
-      properties: ['showOverwriteConfirmation']
-    });
+    let chosenPath = null;
+    try {
+      if (targetWin && !targetWin.isDestroyed()) {
+        chosenPath = dialog.showSaveDialogSync(targetWin, {
+          title: 'Salvar Arquivo Como',
+          defaultPath: defaultPath,
+          properties: ['showOverwriteConfirmation']
+        });
+      } else {
+        chosenPath = dialog.showSaveDialogSync({
+          title: 'Salvar Arquivo Como',
+          defaultPath: defaultPath,
+          properties: ['showOverwriteConfirmation']
+        });
+      }
+    } catch (err) {
+      console.warn('Aviso no showSaveDialogSync:', err.message);
+      chosenPath = defaultPath;
+    }
 
     // Se o usuário cancelou a caixa de diálogo
     if (!chosenPath) {
@@ -1856,7 +1881,7 @@ app.whenReady().then(() => {
       if (!url || url === 'about:blank' || url === 'about:blank#') {
         return { action: 'deny' };
       }
-      const targetWin = BrowserWindow.fromWebContents(contents) || getActiveWindow();
+      const targetWin = safeGetWindowFromWebContents(contents);
       if (url.startsWith('ftp://')) {
         downloadFtpUrl(url, targetWin);
         return { action: 'deny' };
