@@ -572,22 +572,40 @@ function showToastNotification(icon, title, desc, isError = false) {
 
 // ── Detector de Links de Download Direto ──────────
 function isDownloadableUrl(url) {
-  if (!url) return false;
+  if (!url || typeof url !== 'string') return false;
   try {
+    const clean = url.split('?')[0].split('#')[0].toLowerCase();
+    
+    // NUNCA interceptar páginas web comuns (.asp, .aspx, .php, .jsp, .html, .htm, .shtml) como arquivo baixável
+    const webPageExts = ['.asp', '.aspx', '.jsp', '.php', '.html', '.htm', '.shtml'];
+    if (webPageExts.some(ext => clean.endsWith(ext))) {
+      return false;
+    }
+
     const lower = url.toLowerCase();
-    // Identifica servlets e rotas de download do governo e portais legados (ex: DATASUS / CNES)
-    if (lower.includes('downloadservlet') || lower.includes('/downloadservlet') || lower.includes('download.asp') || lower.includes('download.php')) {
+    // Identifica especificamente servlets de download binário (ex: DATASUS / CNES DownloadServlet)
+    if (lower.includes('downloadservlet') || lower.includes('/downloadservlet')) {
       return true;
     }
-    const clean = url.split('?')[0].split('#')[0].toLowerCase();
-    const exts = ['.exe', '.msi', '.zip', '.rar', '.7z', '.tar', '.gz', '.dts', '.dbf', '.dbc', '.cnv', '.iso', '.bin', '.apk', '.dmg', '.rpm', '.deb', '.txt', '.csv', '.pdf'];
+
+    // Extensões de arquivos executáveis, compactados e bases de dados que devem ser baixados diretamente
+    const exts = [
+      '.exe', '.msi', '.zip', '.rar', '.7z', '.tar', '.gz',
+      '.dts', '.dbf', '.dbc', '.cnv', '.iso', '.bin', '.apk',
+      '.dmg', '.rpm', '.deb'
+    ];
     if (exts.some(ext => clean.endsWith(ext))) {
       return true;
     }
+
+    // Se houver parâmetros de query, verifica se termina explicitamente com uma extensão compactada (ex: file=data.zip)
     const query = url.split('?')[1]?.toLowerCase() || '';
-    if (exts.some(ext => query.includes(ext))) {
-      return true;
+    if (query) {
+      if (exts.some(ext => query.endsWith(ext) || query.includes(ext + '&') || query.includes('=' + ext.replace('.', '')))) {
+        return true;
+      }
     }
+
     return false;
   } catch (e) {
     return false;
@@ -787,6 +805,21 @@ function createIncognitoTabWithPartition(partition, initialUrl) {
     }
     if (activeTabId === id) updateNavButtons();
   });
+  wv.addEventListener('did-fail-load', () => {
+    const t = tabs.find(item => item.id === id);
+    if (t) {
+      const faviconEl = t.tabEl.querySelector('.tab-favicon');
+      if (faviconEl && faviconEl.querySelector('.tab-favicon-spinner')) {
+        if (t.url && !t.url.startsWith('about:') && !t.url.startsWith('vortex://')) {
+          setTabFaviconFromUrl(faviconEl, t.url, true);
+        } else {
+          faviconEl.className = 'tab-favicon tab-favicon-incognito';
+          faviconEl.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><line x1="1" y1="1" x2="23" y2="23" stroke-width="2"/></svg>`;
+        }
+      }
+    }
+    if (activeTabId === id) updateNavButtons();
+  });
   // Favicon real do site na aba anônima
   wv.addEventListener('page-favicon-updated', (e) => {
     if (!e.favicons || !e.favicons.length) return;
@@ -840,7 +873,6 @@ function createIncognitoTabWithPartition(partition, initialUrl) {
   });
   wv.addEventListener('will-navigate', (e) => {
     if (e.url.startsWith('ftp://')) { e.preventDefault(); window.vortexAPI.downloadFtp(e.url); return; }
-    if (isDownloadableUrl(e.url)) { e.preventDefault(); window.vortexAPI.downloadUrl(e.url); return; }
   });
   wv.addEventListener('new-window', (e) => {
     e.preventDefault();
@@ -1286,6 +1318,21 @@ function createWebview(id, url) {
     if (activeTabId === id) updateNavButtons();
   });
 
+  wv.addEventListener('did-fail-load', () => {
+    const t = tabs.find(item => item.id === id);
+    if (t) {
+      const faviconEl = t.tabEl.querySelector('.tab-favicon');
+      if (faviconEl && faviconEl.querySelector('.tab-favicon-spinner')) {
+        if (t.url && !t.url.startsWith('about:') && !t.url.startsWith('vortex://')) {
+          setTabFaviconFromUrl(faviconEl, t.url, false);
+        } else {
+          faviconEl.innerHTML = `<svg class="tab-favicon-default" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`;
+        }
+      }
+    }
+    if (activeTabId === id) updateNavButtons();
+  });
+
   // ── Favicon do site (ícone da aba igual Chrome) ──
   wv.addEventListener('page-favicon-updated', (e) => {
     if (!e.favicons || !e.favicons.length) return;
@@ -1361,16 +1408,11 @@ function createWebview(id, url) {
     }
   });
 
-  // Interceptar tentativas de navegação da página para FTP ou downloads diretos
+  // Interceptar tentativas de navegação da página para FTP
   wv.addEventListener('will-navigate', (e) => {
     if (e.url.startsWith('ftp://')) {
       e.preventDefault();
       window.vortexAPI.downloadFtp(e.url);
-      return;
-    }
-    if (isDownloadableUrl(e.url)) {
-      e.preventDefault();
-      window.vortexAPI.downloadUrl(e.url);
       return;
     }
   });

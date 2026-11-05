@@ -352,27 +352,42 @@ let adBlockStats = { blockedCount: 0, enabled: true };
 
 // Detector de arquivos que devem ser baixados diretamente
 function isDownloadableUrl(url) {
-  if (!url) return false;
+  if (!url || typeof url !== 'string') return false;
   try {
+    const cleanUrl = url.split('?')[0].split('#')[0].toLowerCase();
+
+    // NUNCA interceptar páginas web comuns (.asp, .aspx, .php, .jsp, .html, .htm, .shtml) como arquivo baixável
+    const webPageExts = ['.asp', '.aspx', '.jsp', '.php', '.html', '.htm', '.shtml'];
+    if (webPageExts.some(ext => cleanUrl.endsWith(ext))) {
+      return false;
+    }
+
     const lower = url.toLowerCase();
-    // Identifica servlets e rotas de download do governo e portais legados (ex: DATASUS / CNES)
-    if (lower.includes('downloadservlet') || lower.includes('/downloadservlet') || lower.includes('download.asp') || lower.includes('download.php')) {
+    // Identifica especificamente servlets de download binário (ex: DATASUS / CNES DownloadServlet)
+    if (lower.includes('downloadservlet') || lower.includes('/downloadservlet')) {
       return true;
     }
-    const cleanUrl = url.split('?')[0].split('#')[0].toLowerCase();
+
+    // Extensões de arquivos executáveis, compactados e bases de dados que devem ser baixados diretamente
     const downloadExtensions = [
       '.exe', '.msi', '.zip', '.rar', '.7z', '.tar', '.gz',
       '.dts', '.dbf', '.dbc', '.cnv', '.iso', '.bin', '.apk',
-      '.dmg', '.rpm', '.deb', '.txt', '.csv', '.pdf'
+      '.dmg', '.rpm', '.deb'
     ];
-    // Se o caminho do arquivo terminar com extensão ou se a query contiver arquivo compactado
+
+    // Se o caminho do arquivo terminar com uma extensão de download
     if (downloadExtensions.some(ext => cleanUrl.endsWith(ext))) {
       return true;
     }
+
+    // Se houver parâmetros de query, verifica se termina explicitamente com uma extensão compactada (ex: file=data.zip)
     const query = url.split('?')[1]?.toLowerCase() || '';
-    if (downloadExtensions.some(ext => query.includes(ext))) {
-      return true;
+    if (query) {
+      if (downloadExtensions.some(ext => query.endsWith(ext) || query.includes(ext + '&') || query.includes('=' + ext.replace('.', '')))) {
+        return true;
+      }
     }
+
     return false;
   } catch (e) {
     return false;
@@ -469,8 +484,20 @@ async function downloadFtpUrl(ftpUrl, originWin = null) {
   }
 }
 
-// Inicia download HTTP/HTTPS via gerenciador de sessão do Electron
+// Inicia download HTTP/HTTPS via gerenciador de sessão do Electron com proteção contra chamadas duplicadas
+let lastDownloadUrl = '';
+let lastDownloadTime = 0;
+
 function downloadHttpUrl(url) {
+  if (!url || typeof url !== 'string') return;
+  const now = Date.now();
+  // Evita disparos duplicados para a mesma URL em menos de 3 segundos
+  if (url === lastDownloadUrl && (now - lastDownloadTime) < 3000) {
+    return;
+  }
+  lastDownloadUrl = url;
+  lastDownloadTime = now;
+
   try {
     session.defaultSession.downloadURL(url);
   } catch (e) {
@@ -650,7 +677,33 @@ function initDefaultSession() {
   });
 
   // Gerenciador Nativo de Downloads HTTP/HTTPS do Vortex
+  let isSaveDialogActive = false;
+  let lastPromptedDownloadUrl = '';
+  let lastPromptedDownloadTime = 0;
+
   defaultSession.on('will-download', (event, item, webContents) => {
+    const itemUrl = item.getURL ? item.getURL() : '';
+    const itemChain = item.getURLChain ? item.getURLChain() : [];
+    const originUrl = itemChain.length > 0 ? itemChain[0] : itemUrl;
+    const now = Date.now();
+
+    // Se um diálogo de salvar já estiver aberto na tela, cancela a solicitação concorrente para evitar caixa dupla
+    if (isSaveDialogActive) {
+      console.log('[Vortex Download] Diálogo já ativo na tela. Cancelando download duplicado:', originUrl);
+      item.cancel();
+      return;
+    }
+
+    // Se a mesma URL disparou outro download em menos de 2,5 segundos, cancela o duplicado
+    if (originUrl && originUrl === lastPromptedDownloadUrl && (now - lastPromptedDownloadTime) < 2500) {
+      console.log('[Vortex Download] Ignorando download concorrente para mesma URL:', originUrl);
+      item.cancel();
+      return;
+    }
+
+    lastPromptedDownloadUrl = originUrl;
+    lastPromptedDownloadTime = now;
+
     const fileName = item.getFilename();
     const totalBytes = item.getTotalBytes();
     const downloadsDir = app.getPath('downloads');
@@ -659,6 +712,7 @@ function initDefaultSession() {
 
     // Abre diálogo para o usuário escolher a pasta de destino e nome do arquivo (igual Chrome)
     let chosenPath = null;
+    isSaveDialogActive = true;
     try {
       if (targetWin && !targetWin.isDestroyed()) {
         chosenPath = dialog.showSaveDialogSync(targetWin, {
@@ -676,6 +730,8 @@ function initDefaultSession() {
     } catch (err) {
       console.warn('Aviso no showSaveDialogSync:', err.message);
       chosenPath = defaultPath;
+    } finally {
+      isSaveDialogActive = false;
     }
 
     // Se o usuário cancelou a caixa de diálogo
@@ -1319,16 +1375,51 @@ ipcMain.on('open-private-tab', (event, initialUrl) => {
 
   // Gerenciar downloads na sessão anônima
   privateSession.on('will-download', (ev, item) => {
+    const itemUrl = item.getURL ? item.getURL() : '';
+    const itemChain = item.getURLChain ? item.getURLChain() : [];
+    const originUrl = itemChain.length > 0 ? itemChain[0] : itemUrl;
+    const now = Date.now();
+
+    if (isSaveDialogActive) {
+      item.cancel();
+      return;
+    }
+    if (originUrl && originUrl === lastPromptedDownloadUrl && (now - lastPromptedDownloadTime) < 2500) {
+      item.cancel();
+      return;
+    }
+
+    lastPromptedDownloadUrl = originUrl;
+    lastPromptedDownloadTime = now;
+
     const fileName = item.getFilename();
     const totalBytes = item.getTotalBytes();
     const downloadsDir = app.getPath('downloads');
     const defaultPath = path.join(downloadsDir, fileName);
+    const targetWin = safeGetWindowFromWebContents(null);
 
-    const chosenPath = dialog.showSaveDialogSync(mainWindow, {
-      title: 'Salvar Arquivo Como (Guia Anônima)',
-      defaultPath: defaultPath,
-      properties: ['showOverwriteConfirmation']
-    });
+    let chosenPath = null;
+    isSaveDialogActive = true;
+    try {
+      if (targetWin && !targetWin.isDestroyed()) {
+        chosenPath = dialog.showSaveDialogSync(targetWin, {
+          title: 'Salvar Arquivo Como (Guia Anônima)',
+          defaultPath: defaultPath,
+          properties: ['showOverwriteConfirmation']
+        });
+      } else {
+        chosenPath = dialog.showSaveDialogSync({
+          title: 'Salvar Arquivo Como (Guia Anônima)',
+          defaultPath: defaultPath,
+          properties: ['showOverwriteConfirmation']
+        });
+      }
+    } catch (err) {
+      console.warn('Aviso no showSaveDialogSync anônimo:', err.message);
+      chosenPath = defaultPath;
+    } finally {
+      isSaveDialogActive = false;
+    }
 
     if (!chosenPath) {
       item.cancel();
@@ -1336,19 +1427,19 @@ ipcMain.on('open-private-tab', (event, initialUrl) => {
     }
 
     item.setSavePath(chosenPath);
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('download-started', { fileName: path.basename(chosenPath), totalBytes });
+    if (targetWin && !targetWin.isDestroyed()) {
+      targetWin.webContents.send('download-started', { fileName: path.basename(chosenPath), totalBytes });
     }
     item.on('updated', (e2, state) => {
-      if (state === 'progressing' && mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('download-progress', {
+      if (state === 'progressing' && targetWin && !targetWin.isDestroyed()) {
+        targetWin.webContents.send('download-progress', {
           fileName: path.basename(chosenPath), receivedBytes: item.getReceivedBytes(), totalBytes: item.getTotalBytes()
         });
       }
     });
     item.once('done', (e2, state) => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('download-completed', {
+      if (targetWin && !targetWin.isDestroyed()) {
+        targetWin.webContents.send('download-completed', {
           fileName: path.basename(chosenPath), state, savePath: item.getSavePath ? item.getSavePath() : chosenPath
         });
       }
@@ -1881,6 +1972,14 @@ app.whenReady().then(() => {
       if (!url || url === 'about:blank' || url === 'about:blank#') {
         return { action: 'deny' };
       }
+
+      // Se o webContents for de um <webview> (aba do navegador),
+      // o próprio renderer.js escuta o evento 'new-window' do webview
+      // e gerencia abas normais ou anônimas e downloads sem duplicidade!
+      if (contents.getType() === 'webview') {
+        return { action: 'deny' };
+      }
+
       const targetWin = safeGetWindowFromWebContents(contents);
       if (url.startsWith('ftp://')) {
         downloadFtpUrl(url, targetWin);
@@ -1901,11 +2000,6 @@ app.whenReady().then(() => {
       if (url.startsWith('ftp://')) {
         event.preventDefault();
         downloadFtpUrl(url);
-        return;
-      }
-      if (isDownloadableUrl(url)) {
-        event.preventDefault();
-        downloadHttpUrl(url);
         return;
       }
     });
