@@ -1600,15 +1600,24 @@ ipcMain.handle('dock-devtools', async (event, { targetWebContentsId, devtoolsWeb
       targetWc.openDevTools({ mode: 'right' });
     }
 
-    if (typeof x === 'number' && typeof y === 'number') {
-      const px = Math.max(0, Math.round(x));
-      const py = Math.max(0, Math.round(y));
-      setTimeout(() => {
-        try {
-          if (!targetWc.isDestroyed()) targetWc.inspectElement(px, py);
-        } catch (e) {}
-      }, 150);
-    }
+    // Coordenadas para inspeção de elemento
+    // Se x e y não foram especificados (ex: F12 ou clique no botão), usa (100, 100) para forçar o Chromium
+    // a inicializar o DOM agent e renderizar a árvore de código HTML imediatamente na primeira abertura!
+    const px = (typeof x === 'number') ? Math.max(0, Math.round(x)) : 100;
+    const py = (typeof y === 'number') ? Math.max(0, Math.round(y)) : 100;
+
+    const doInspect = () => {
+      try {
+        if (!targetWc.isDestroyed()) {
+          targetWc.inspectElement(px, py);
+        }
+      } catch (e) {}
+    };
+
+    setTimeout(doInspect, 150);
+    setTimeout(doInspect, 450);
+    setTimeout(doInspect, 800);
+
     return { success: true, dockedInContainer };
   } catch (err) {
     console.error('Erro ao acoplar DevTools:', err);
@@ -1623,16 +1632,15 @@ ipcMain.handle('open-devtools', async (event, { targetWebContentsId, mode, x, y 
       return { success: false, error: 'WebContents não encontrado' };
     }
     const devMode = mode || 'detach';
-    if (typeof x === 'number' && typeof y === 'number') {
-      targetWc.openDevTools({ mode: devMode });
-      const px = Math.max(0, Math.round(x));
-      const py = Math.max(0, Math.round(y));
+    targetWc.openDevTools({ mode: devMode });
+
+    const px = (typeof x === 'number') ? Math.max(0, Math.round(x)) : 100;
+    const py = (typeof y === 'number') ? Math.max(0, Math.round(y)) : 100;
+    setTimeout(() => {
       try {
         if (!targetWc.isDestroyed()) targetWc.inspectElement(px, py);
       } catch(e) {}
-    } else {
-      targetWc.openDevTools({ mode: devMode });
-    }
+    }, 200);
     return { success: true };
   } catch (err) {
     console.error('Erro ao abrir DevTools:', err);

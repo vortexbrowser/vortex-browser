@@ -2552,10 +2552,15 @@ async function openDockedDevTools(targetWv, inspectX, inspectY) {
         y: inspectY
       });
       if (res && res.success) {
-        if (typeof inspectX === 'number' && typeof inspectY === 'number' && typeof wv.inspectElement === 'function') {
+        const effX = (typeof inspectX === 'number') ? Math.round(inspectX) : 100;
+        const effY = (typeof inspectY === 'number') ? Math.round(inspectY) : 100;
+        if (typeof wv.inspectElement === 'function') {
           setTimeout(() => {
-            try { wv.inspectElement(Math.round(inspectX), Math.round(inspectY)); } catch(e) {}
+            try { wv.inspectElement(effX, effY); } catch(e) {}
           }, 150);
+          setTimeout(() => {
+            try { wv.inspectElement(effX, effY); } catch(e) {}
+          }, 500);
         }
         return;
       }
