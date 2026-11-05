@@ -79,9 +79,10 @@ try {
     githubReleaseUrl: `https://github.com/vortexbrowser/vortex-browser/releases/tag/${tag}`,
     changelog: [
       `Vortex Browser ${tag} Oficial`,
-      'Atualizações 100% Nativas: Downloads de atualização executados exclusivamente dentro do próprio Vortex Browser com notificação e barra de progresso, sem abrir navegadores externos',
-      'Download do instalador atualizado pelo site oficial e notificação integrada',
-      'Correção e liberação do arraste de janela para múltiplos monitores na barra de abas',
+      'Abertura de Links em Nova Guia: Menu de contexto com opção "Abrir link em uma nova guia", "Abrir link em nova guia anônima" e "Copiar endereço do link"',
+      'Suporte a links com target="_blank" e popups em portais de saúde/governo (DATASUS, CNES e outros)',
+      'Abertura rápida com clique do botão do meio do mouse (scrollwheel click)',
+      'Atualizações 100% Nativas: Downloads de atualização executados exclusivamente dentro do próprio Vortex Browser com notificação e barra de progresso',
       'Menus e popups com fechamento instantâneo por toggle e clique externo',
       'DevTools e Inspeção de Elementos com abertura instantânea sem travamentos'
     ]
@@ -206,7 +207,7 @@ if (token) {
       const releases = JSON.parse(listRes.body || '[]');
       let rel = Array.isArray(releases) ? releases.find(r => r.tag_name === tag) : null;
 
-      const releaseBody = `## 🚀 Novidades na versão ${tag}\n\n- 🔄 **Atualização 100% Interna**: O Vortex agora notifica e baixa atualizações exclusivamente dentro da sua própria janela e gerenciador de downloads nativo, sem abrir Google Chrome ou outros navegadores.\n- 🖥️ **Arrastar entre Monitores**: Suporte nativo para arrastar a janela livremente entre múltiplos monitores pela barra de abas.\n- 🎯 **Popups e Menus Otimizados**: Menus com fechamento imediato por toggle e clique fora.\n- ⚡ **Inspecionar e DevTools Instantâneo**: Ferramentas de desenvolvedor abertas imediatamente sem atrasos.`;
+      const releaseBody = `## 🚀 Novidades na versão ${tag}\n\n- 🔗 **Abertura de Links em Nova Guia**: Menu de contexto nativo com "Abrir link em uma nova guia", "Abrir link em uma nova guia anônima" e "Copiar endereço do link".\n- 🏥 **Compatibilidade com Portais Públicos**: Suporte aprimorado para portais governamentais e de saúde como CNES e DATASUS (links target="_blank" e popups).\n- 🖱️ **Clique do Botão do Meio (Scrollwheel)**: Suporte completo para abrir links em nova aba com o botão de rolagem do mouse.\n- 🔄 **Atualização 100% Interna**: O Vortex notifica e baixa atualizações exclusivamente dentro da sua própria janela nativa.\n- 🎯 **Popups e Menus Otimizados**: Menus com fechamento imediato por toggle e clique fora.\n- ⚡ **Inspecionar e DevTools Instantâneo**: Ferramentas de desenvolvedor abertas imediatamente sem atrasos.`;
 
       if (!rel) {
         console.log(`[GitHub API] Criando nova Release ${tag}...`);
