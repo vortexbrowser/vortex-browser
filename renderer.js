@@ -850,12 +850,34 @@ function createIncognitoTabWithPartition(partition, initialUrl) {
             console.log('__VORTEX_FTP__:' + a.href);
           }
         }, true);
+        // Detector de clique com botão do meio (scrollwheel click) para abrir em nova guia como Chrome
+        document.addEventListener('auxclick', (e) => {
+          if (e.button === 1) { // Botão do meio
+            const a = e.target.closest('a');
+            if (a && a.href && !a.href.startsWith('javascript:')) {
+              e.preventDefault();
+              e.stopPropagation();
+              console.log('__VORTEX_AUX_CLICK__:' + a.href);
+            }
+          }
+        }, true);
       }
     `).catch(() => {});
   });
   wv.addEventListener('console-message', (e) => {
     if (e.message && e.message.startsWith('__VORTEX_FTP__:')) {
       window.vortexAPI.downloadFtp(e.message.replace('__VORTEX_FTP__:', ''));
+    } else if (e.message && e.message.startsWith('__VORTEX_AUX_CLICK__:')) {
+      const auxUrl = e.message.replace('__VORTEX_AUX_CLICK__:', '').trim();
+      if (auxUrl) {
+        if (auxUrl.startsWith('ftp://')) {
+          window.vortexAPI.downloadFtp(auxUrl);
+        } else if (isDownloadableUrl(auxUrl)) {
+          window.vortexAPI.downloadUrl(auxUrl);
+        } else {
+          createIncognitoTabWithPartition(partition, auxUrl);
+        }
+      }
     }
   });
   wv.addEventListener('context-menu', (e) => {
@@ -881,7 +903,7 @@ function createIncognitoTabWithPartition(partition, initialUrl) {
         clickX = e.params ? (rect.left + e.params.x) : (window.innerWidth / 2);
         clickY = e.params ? (rect.top + e.params.y) : (window.innerHeight / 2);
       }
-      showContextMenuAt(clickX, clickY);
+      showContextMenuAt(clickX, clickY, e.params);
     }
   });
 
@@ -1420,6 +1442,18 @@ function createWebview(id, url) {
           }
         }, true);
 
+        // Detector de clique com botão do meio (scrollwheel click) para abrir em nova guia como Chrome
+        document.addEventListener('auxclick', (e) => {
+          if (e.button === 1) { // Botão do meio
+            const a = e.target.closest('a');
+            if (a && a.href && !a.href.startsWith('javascript:')) {
+              e.preventDefault();
+              e.stopPropagation();
+              console.log('__VORTEX_AUX_CLICK__:' + a.href);
+            }
+          }
+        }, true);
+
         // Detector de Envio de Senhas para salvar no Vortex
         document.addEventListener('submit', (e) => {
           try {
@@ -1619,6 +1653,17 @@ function createWebview(id, url) {
       if (activeTabId === id && bannerDomain) {
         showCookieConsentPrompt(bannerDomain);
       }
+    } else if (e.message && e.message.startsWith('__VORTEX_AUX_CLICK__:')) {
+      const auxUrl = e.message.replace('__VORTEX_AUX_CLICK__:', '').trim();
+      if (auxUrl) {
+        if (auxUrl.startsWith('ftp://')) {
+          window.vortexAPI.downloadFtp(auxUrl);
+        } else if (isDownloadableUrl(auxUrl)) {
+          window.vortexAPI.downloadUrl(auxUrl);
+        } else {
+          createTab(auxUrl);
+        }
+      }
     }
   });
 
@@ -1645,7 +1690,7 @@ function createWebview(id, url) {
         clickX = e.params ? (rect.left + e.params.x) : (window.innerWidth / 2);
         clickY = e.params ? (rect.top + e.params.y) : (window.innerHeight / 2);
       }
-      showContextMenuAt(clickX, clickY);
+      showContextMenuAt(clickX, clickY, e.params);
     }
   });
 
@@ -3207,9 +3252,30 @@ function applySettingsFromData(s) {
 // MENU DE CONTEXTO (Botão Direito)
 // ══════════════════════════════════════════
 const contextMenu = document.getElementById('contextMenu');
+let contextMenuLinkURL = '';
 
-async function showContextMenuAt(clientX, clientY) {
+async function showContextMenuAt(clientX, clientY, params = null) {
   closeAllMenus();
+
+  // Verifica se o clique com botão direito ocorreu em cima de um link
+  contextMenuLinkURL = (params && typeof params.linkURL === 'string') ? params.linkURL.trim() : '';
+
+  const ctxOpenLinkNewTab = document.getElementById('ctx-open-link-new-tab');
+  const ctxOpenLinkIncognito = document.getElementById('ctx-open-link-incognito');
+  const ctxCopyLink = document.getElementById('ctx-copy-link');
+  const ctxLinkDivider = document.getElementById('ctx-link-divider');
+
+  if (contextMenuLinkURL && contextMenuLinkURL !== 'about:blank' && contextMenuLinkURL !== 'about:blank#') {
+    if (ctxOpenLinkNewTab) ctxOpenLinkNewTab.style.display = 'flex';
+    if (ctxOpenLinkIncognito) ctxOpenLinkIncognito.style.display = 'flex';
+    if (ctxCopyLink) ctxCopyLink.style.display = 'flex';
+    if (ctxLinkDivider) ctxLinkDivider.style.display = 'block';
+  } else {
+    if (ctxOpenLinkNewTab) ctxOpenLinkNewTab.style.display = 'none';
+    if (ctxOpenLinkIncognito) ctxOpenLinkIncognito.style.display = 'none';
+    if (ctxCopyLink) ctxCopyLink.style.display = 'none';
+    if (ctxLinkDivider) ctxLinkDivider.style.display = 'none';
+  }
   
   // Usa diretamente as coordenadas do ponteiro fornecidas pelo evento para exibição imediata e fluida (0ms de latência)
   let posX = clientX;
@@ -3237,8 +3303,8 @@ async function showContextMenuAt(clientX, clientY) {
   let y = Math.round(posY);
 
   // Dimensões do menu de contexto
-  const menuW = 230;
-  const menuH = 320;
+  const menuW = 240;
+  const menuH = contextMenuLinkURL ? 420 : 320;
 
   // Evitar sair da tela na direita ou no fundo
   if (x + menuW > window.innerWidth - 6) {
@@ -3283,6 +3349,44 @@ viewsContainerEl.addEventListener('contextmenu', (e) => {
     } catch (err) {}
   }
   showContextMenuAt(clickX, clickY);
+});
+
+document.getElementById('ctx-open-link-new-tab')?.addEventListener('click', () => {
+  const urlToOpen = contextMenuLinkURL;
+  closeAllMenus();
+  if (urlToOpen) {
+    if (urlToOpen.startsWith('ftp://')) {
+      window.vortexAPI.downloadFtp(urlToOpen);
+    } else if (isDownloadableUrl(urlToOpen)) {
+      window.vortexAPI.downloadUrl(urlToOpen);
+    } else {
+      createTab(urlToOpen);
+    }
+  }
+});
+
+document.getElementById('ctx-open-link-incognito')?.addEventListener('click', () => {
+  const urlToOpen = contextMenuLinkURL;
+  closeAllMenus();
+  if (urlToOpen) {
+    if (urlToOpen.startsWith('ftp://')) {
+      window.vortexAPI.downloadFtp(urlToOpen);
+    } else if (isDownloadableUrl(urlToOpen)) {
+      window.vortexAPI.downloadUrl(urlToOpen);
+    } else {
+      openIncognitoTab(urlToOpen);
+    }
+  }
+});
+
+document.getElementById('ctx-copy-link')?.addEventListener('click', () => {
+  const urlToCopy = contextMenuLinkURL;
+  closeAllMenus();
+  if (urlToCopy && navigator.clipboard) {
+    navigator.clipboard.writeText(urlToCopy).then(() => {
+      showToastNotification('📋', 'Link Copiado', 'Endereço copiado para a área de transferência.');
+    }).catch(() => {});
+  }
 });
 
 document.getElementById('ctx-back')?.addEventListener('click', () => {

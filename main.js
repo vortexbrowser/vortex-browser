@@ -1839,8 +1839,8 @@ app.whenReady().then(() => {
       if (url.startsWith('devtools://') || url.startsWith('chrome-devtools://')) {
         return { action: 'allow' };
       }
-      // Se for webview ou se a URL for vazia/about:blank, não duplica a abertura via IPC
-      if (!url || url === 'about:blank' || url === 'about:blank#' || contents.getType() === 'webview') {
+      // Se a URL for vazia ou about:blank
+      if (!url || url === 'about:blank' || url === 'about:blank#') {
         return { action: 'deny' };
       }
       const targetWin = BrowserWindow.fromWebContents(contents) || getActiveWindow();
