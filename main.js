@@ -1780,8 +1780,8 @@ function setupAutoUpdater() {
     console.warn('[AutoUpdater] Erro ao configurar FeedURL:', err.message);
   }
 
-  // Notificação com confirmação do usuário (NÃO baixa automaticamente; aguarda clique do usuário para iniciar o download)
-  autoUpdater.autoDownload = false;
+  // Baixa a atualização automaticamente em segundo plano (como o Chrome)
+  autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
 
   autoUpdater.on('checking-for-update', () => {
@@ -1827,6 +1827,26 @@ function setupAutoUpdater() {
     broadcastToWindows('update-downloaded', {
       version: info.version
     });
+
+    // Pergunta ativamente ao usuário se deseja reiniciar para aplicar a nova versão
+    const targetWin = getActiveWindow();
+    dialog.showMessageBox(targetWin || undefined, {
+      type: 'info',
+      title: 'Atualização Pronta - Vortex Browser',
+      message: `A nova versão ${info.version} do Vortex Browser foi baixada e está pronta para instalar!`,
+      detail: 'Deseja reiniciar o navegador agora para aplicar a atualização?',
+      buttons: ['Reiniciar e Atualizar Agora', 'Mais Tarde'],
+      defaultId: 0,
+      cancelId: 1
+    }).then(({ response }) => {
+      if (response === 0) {
+        try {
+          autoUpdater.quitAndInstall(false, true);
+        } catch (e) {
+          console.error('Erro ao reiniciar para aplicar atualização:', e);
+        }
+      }
+    }).catch(() => {});
   });
 }
 
@@ -1919,19 +1939,64 @@ app.whenReady().then(() => {
   setupAutoUpdater();
 
   // Verificação de atualização estilo Google Chrome:
-  // Checa 3.5 segundos após iniciar e depois periodicamente a cada 30 minutos em segundo plano
-  function runBackgroundUpdateCheck() {
+  // Checa 2 segundos após iniciar e periodicamente a cada 15 minutos em segundo plano
+  let isCheckingBackgroundUpdate = false;
+  async function runBackgroundUpdateCheck() {
+    if (isCheckingBackgroundUpdate) return;
+    isCheckingBackgroundUpdate = true;
+    const currentVer = app.getVersion();
+
     try {
       if (app.isPackaged && autoUpdater) {
-        autoUpdater.checkForUpdates().catch(err => {
-          console.warn('[AutoUpdater] Verificação em background falhou:', err.message);
-        });
+        const res = await autoUpdater.checkForUpdates();
+        if (res && res.updateInfo && isNewerVersion(res.updateInfo.version, currentVer)) {
+          // electron-updater iniciou o download em segundo plano automaticamente (autoDownload = true)
+          isCheckingBackgroundUpdate = false;
+          return;
+        }
       }
-    } catch(e) {}
+    } catch (err) {
+      console.warn('[AutoUpdater] Verificação do autoUpdater falhou, tentando fallback GitHub:', err.message);
+    }
+
+    // Fallback: Verifica diretamente a Release no GitHub caso autoUpdater não consiga
+    try {
+      const direct = await checkGitHubReleaseDirect();
+      if (direct && direct.found && isNewerVersion(direct.version, currentVer)) {
+        console.log('[AutoUpdater] Nova versão encontrada via API GitHub:', direct.version);
+        broadcastToWindows('update-available', {
+          version: direct.version,
+          releaseDate: direct.publishedAt,
+          releaseNotes: direct.releaseNotes || '',
+          downloadUrl: direct.downloadUrl
+        });
+
+        // Pergunta ao usuário se deseja atualizar agora
+        const targetWin = getActiveWindow();
+        dialog.showMessageBox(targetWin || undefined, {
+          type: 'info',
+          title: 'Atualização Disponível - Vortex Browser',
+          message: `A nova versão ${direct.version} do Vortex Browser está disponível!`,
+          detail: 'Deseja baixar e aplicar a nova versão agora?',
+          buttons: ['Atualizar Agora', 'Lembrar Mais Tarde'],
+          defaultId: 0,
+          cancelId: 1
+        }).then(({ response }) => {
+          if (response === 0 && direct.downloadUrl) {
+            console.log('[AutoUpdater] Baixando instalador da nova versão:', direct.downloadUrl);
+            session.defaultSession.downloadURL(direct.downloadUrl);
+          }
+        }).catch(() => {});
+      }
+    } catch (e) {
+      console.warn('[AutoUpdater] Erro no fallback de verificação:', e.message);
+    } finally {
+      isCheckingBackgroundUpdate = false;
+    }
   }
 
-  setTimeout(runBackgroundUpdateCheck, 3500);
-  setInterval(runBackgroundUpdateCheck, 30 * 60 * 1000);
+  setTimeout(runBackgroundUpdateCheck, 2000);
+  setInterval(runBackgroundUpdateCheck, 15 * 60 * 1000);
 
   // Garante isolamento estrito contra injeção maliciosa em webviews (reforço de segurança do Chromium)
   app.on('web-contents-created', (event, contents) => {

@@ -4496,6 +4496,7 @@ if (window.vortexAPI?.getUserProfile) {
     window.vortexAPI.onUpdateAvailable((info) => {
       showUpdateNotification(info);
       showToastNotification('🚀', 'Atualização Disponível', `Vortex ${info.version} está disponível para download.`);
+      openUpdateModal();
       forwardToSettingsTab({ type: 'update-available', info });
     });
   }
@@ -4527,6 +4528,7 @@ if (window.vortexAPI?.getUserProfile) {
         btnActionUpdate.textContent = 'Reiniciar Agora';
         btnActionUpdate.disabled = false;
       }
+      openUpdateModal();
       showToastNotification('✓', 'Atualização Pronta', 'Clique em Reiniciar para aplicar a nova versão.');
       forwardToSettingsTab({ type: 'update-downloaded', info });
     });
