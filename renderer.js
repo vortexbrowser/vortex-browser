@@ -867,11 +867,14 @@ function createIncognitoTabWithPartition(partition, initialUrl) {
     const t = tabs.find(item => item.id === id);
     if (t) {
       t.url = e.url;
+      t.isTranslated = false;
+      t.detectedLangLabel = null;
       if (activeTabId === id) {
         addressInputEl.value = e.url;
         updateSecurityBadge(e.url);
         updateNavButtons();
         updateStarState(e.url);
+        if (typeof syncTranslatePopupUI === 'function') syncTranslatePopupUI(t);
       }
       // NÃO salva histórico — modo anônimo
     }
@@ -1425,12 +1428,15 @@ function createWebview(id, url) {
     const t = tabs.find(item => item.id === id);
     if (t) {
       t.url = e.url;
+      t.isTranslated = false;
+      t.detectedLangLabel = null;
       if (activeTabId === id) {
         addressInputEl.value = e.url;
         updateSecurityBadge(e.url);
         updateNavButtons();
         updateStarState(e.url);
         closeCookieConsentPrompt();
+        if (typeof syncTranslatePopupUI === 'function') syncTranslatePopupUI(t);
       }
       addToHistory(e.url, t.title);
 
@@ -1884,6 +1890,7 @@ function switchTab(id) {
       if (activeT && activeT.url && !activeT.isSettings && !activeT.isHistory && !activeT.isBookmarks && !activeT.isExtensions) {
         updateStarState(activeT.url);
       }
+      if (typeof syncTranslatePopupUI === 'function') syncTranslatePopupUI(activeT);
     } else {
       t.tabEl.classList.remove('active');
       if (t.webview) t.webview.style.display = 'none';
@@ -2775,6 +2782,7 @@ function closeAllPopups(exceptEl) {
     document.getElementById('profilePopup'),
     document.getElementById('vpnPopup'),
     document.getElementById('bookmarkPopup'),
+    document.getElementById('translatePopup'),
     document.getElementById('passwordSavePopup'),
     contextMenu
   ];
@@ -2804,7 +2812,7 @@ btnMenuDots.addEventListener('click', (e) => {
 // Listener global: fecha qualquer popup se clicar fora dele e fora do seu botão disparador
 document.addEventListener('pointerdown', (e) => {
   const isInsidePopupOrButton = e.target.closest(
-    '#dotsMenu, #btnMenuDots, #extensionsPopup, #btnExtensions, #profilePopup, #btnProfileMenu, #vpnPopup, #btnVpn, #bookmarkPopup, #btnBookmarkStar, #passwordSavePopup, #contextMenu'
+    '#dotsMenu, #btnMenuDots, #extensionsPopup, #btnExtensions, #profilePopup, #btnProfileMenu, #vpnPopup, #btnVpn, #bookmarkPopup, #btnBookmarkStar, #translatePopup, #btnTranslatePage, #passwordSavePopup, #contextMenu'
   );
   if (!isInsidePopupOrButton) {
     closeAllPopups();
@@ -5412,24 +5420,262 @@ document.getElementById('menuSplitTab')?.addEventListener('click', () => {
   hideTabContextMenu();
 });
 
-// ── 3. Tradutor de Páginas 1-Clique para Português ───────────────────
+// ── 3. Tradutor Nativo Estilo Google Chrome (In-Place, Sem Mudar URL e Com Restaurar Instantâneo) ──
 const btnTranslatePageEl = document.getElementById('btnTranslatePage');
+const translatePopupEl = document.getElementById('translatePopup');
+const btnTranslateOriginalEl = document.getElementById('btnTranslateOriginal');
+const btnTranslateTargetEl = document.getElementById('btnTranslateTarget');
+const btnTranslateMoreLangsEl = document.getElementById('btnTranslateMoreLangs');
+const btnTranslateCloseEl = document.getElementById('btnTranslateClose');
+const translateLangMenuEl = document.getElementById('translateLangMenu');
+const translateStatusLabelEl = document.getElementById('translateStatusLabel');
 
-function translateActivePage() {
+let currentTargetLangCode = 'pt';
+let currentTargetLangLabel = 'português';
+let isTranslatingNow = false;
+
+const LANG_NAMES_MAP = {
+  en: 'inglês',
+  es: 'espanhol',
+  fr: 'francês',
+  de: 'alemão',
+  it: 'italiano',
+  ja: 'japonês',
+  zh: 'chinês',
+  ru: 'russo',
+  pt: 'português'
+};
+
+function positionTranslatePopup() {
+  if (!translatePopupEl || !btnTranslatePageEl) return;
+  const rect = btnTranslatePageEl.getBoundingClientRect();
+  const rightOffset = Math.max(12, window.innerWidth - rect.right - 20);
+  translatePopupEl.style.right = `${rightOffset}px`;
+  translatePopupEl.style.top = `${Math.round(rect.bottom + 8)}px`;
+}
+
+function syncTranslatePopupUI(tab) {
+  const isTr = !!(tab && tab.isTranslated);
+  btnTranslateOriginalEl?.classList.toggle('active', !isTr);
+  btnTranslateTargetEl?.classList.toggle('active', isTr);
+  btnTranslatePageEl?.classList.toggle('active', isTr);
+  if (btnTranslateTargetEl) btnTranslateTargetEl.textContent = currentTargetLangLabel;
+  if (btnTranslateOriginalEl) {
+    btnTranslateOriginalEl.textContent = (tab && tab.detectedLangLabel) ? tab.detectedLangLabel : 'Idioma detectado';
+  }
+  if (translateStatusLabelEl && !isTranslatingNow) {
+    translateStatusLabelEl.textContent = isTr ? '✓ Página traduzida' : '';
+  }
+}
+
+async function performInPlaceTranslation(targetLang = currentTargetLangCode) {
   const cur = getActiveTab();
-  if (!cur || !cur.url || cur.url.startsWith('vortex://') || cur.url.startsWith('about:')) {
-    showToastNotification('ℹ️', 'Tradutor Vortex', 'Abra uma página da web para traduzir para Português.');
+  if (!cur || !cur.webview || !cur.url || cur.url.startsWith('vortex://') || cur.url.startsWith('about:')) {
+    showToastNotification('ℹ️', 'Google Translate', 'Abra um site na web para traduzir.');
     return;
   }
-  const translateUrl = `https://translate.google.com/translate?sl=auto&tl=pt&u=${encodeURIComponent(cur.url)}`;
-  navigateTo(translateUrl);
-  showToastNotification('🌐', 'Traduzindo Página...', 'Carregando tradução automática para Português.');
+  if (isTranslatingNow) return;
+  isTranslatingNow = true;
+
+  if (translateStatusLabelEl) translateStatusLabelEl.textContent = '⏳ Traduzindo...';
+  btnTranslateOriginalEl?.classList.remove('active');
+  btnTranslateTargetEl?.classList.add('active');
+
+  try {
+    // 1. Extrai todos os nós de texto visíveis no DOM (salvando o texto original em cada nó na primeira vez)
+    const textsToTranslate = await cur.webview.executeJavaScript(`
+      (function() {
+        const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'CODE', 'PRE', 'TEXTAREA', 'SVG', 'MATH']);
+        if (!window.__vortexTrItems) {
+          window.__vortexTrItems = [];
+          window.__vortexOrigTitle = document.title || '';
+          const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+            acceptNode(node) {
+              if (!node.parentElement) return NodeFilter.FILTER_REJECT;
+              if (SKIP_TAGS.has(node.parentElement.tagName)) return NodeFilter.FILTER_REJECT;
+              if (node.parentElement.closest('code, pre, script, style, [ translate="no" ], .notranslate')) {
+                return NodeFilter.FILTER_REJECT;
+              }
+              const raw = node.nodeValue || '';
+              const trimmed = raw.trim();
+              if (trimmed.length < 2) return NodeFilter.FILTER_REJECT;
+              // Ignorar números puros ou símbolos isolados
+              if (/^[0-9\\s.,:;!?@#%^&*()_+\\-=\\[\\]{}|\\\\/<>~"'\\\`]+$/.test(trimmed)) {
+                return NodeFilter.FILTER_REJECT;
+              }
+              return NodeFilter.FILTER_ACCEPT;
+            }
+          });
+
+          let n;
+          while ((n = walker.nextNode()) && window.__vortexTrItems.length < 750) {
+            const val = n.nodeValue;
+            const leadMatch = val.match(/^(\\s*)/);
+            const trailMatch = val.match(/(\\s*)$/);
+            window.__vortexTrItems.push({
+              node: n,
+              orig: val,
+              clean: val.replace(/[\\r\\n]+/g, ' ').trim(),
+              lead: leadMatch ? leadMatch[1] : '',
+              trail: trailMatch ? trailMatch[1] : ''
+            });
+          }
+        }
+
+        const payload = window.__vortexTrItems.map(item => item.clean);
+        if (window.__vortexOrigTitle) {
+          payload.push(window.__vortexOrigTitle.replace(/[\\r\\n]+/g, ' ').trim());
+        }
+        return payload;
+      })();
+    `);
+
+    if (!Array.isArray(textsToTranslate) || textsToTranslate.length === 0) {
+      if (translateStatusLabelEl) translateStatusLabelEl.textContent = 'Nada para traduzir';
+      isTranslatingNow = false;
+      return;
+    }
+
+    // 2. Traduz em lote via Main Process (sem bloqueio de CORS/CSP e sem sair da URL original)
+    const res = await window.vortexAPI.translateBatch({
+      texts: textsToTranslate,
+      targetLang
+    });
+
+    if (res && res.success && Array.isArray(res.translations)) {
+      if (res.detectedLang && LANG_NAMES_MAP[res.detectedLang]) {
+        cur.detectedLangLabel = LANG_NAMES_MAP[res.detectedLang];
+      }
+      // 3. Aplica os textos traduzidos diretamente nos nós do DOM preservando espaçamentos e eventos
+      await cur.webview.executeJavaScript(`
+        (function(translatedList) {
+          if (!window.__vortexTrItems) return;
+          const items = window.__vortexTrItems;
+          for (let i = 0; i < items.length; i++) {
+            const tr = translatedList[i];
+            if (tr && items[i].node) {
+              items[i].node.nodeValue = items[i].lead + tr + items[i].trail;
+            }
+          }
+          if (window.__vortexOrigTitle && translatedList.length > items.length) {
+            const trTitle = translatedList[items.length];
+            if (trTitle) document.title = trTitle;
+          }
+        })(${JSON.stringify(res.translations)});
+      `);
+
+      cur.isTranslated = true;
+      syncTranslatePopupUI(cur);
+    } else {
+      if (translateStatusLabelEl) translateStatusLabelEl.textContent = '⚠️ Falha ao traduzir';
+    }
+  } catch (err) {
+    if (translateStatusLabelEl) translateStatusLabelEl.textContent = '⚠️ Erro na tradução';
+  } finally {
+    isTranslatingNow = false;
+  }
+}
+
+async function restoreOriginalPageLanguage() {
+  const cur = getActiveTab();
+  if (!cur || !cur.webview) return;
+
+  // Caso o usuário estivesse em uma URL antiga do proxy translate.goog, volta para a URL original real
+  if (cur.url && cur.url.includes('.translate.goog')) {
+    if (cur.webview.canGoBack && cur.webview.canGoBack()) {
+      cur.webview.goBack();
+    }
+    cur.isTranslated = false;
+    syncTranslatePopupUI(cur);
+    return;
+  }
+
+  try {
+    await cur.webview.executeJavaScript(`
+      (function() {
+        if (window.__vortexTrItems) {
+          for (const item of window.__vortexTrItems) {
+            if (item.node && typeof item.orig === 'string') {
+              item.node.nodeValue = item.orig;
+            }
+          }
+        }
+        if (window.__vortexOrigTitle) {
+          document.title = window.__vortexOrigTitle;
+        }
+      })();
+    `);
+  } catch (e) {}
+
+  cur.isTranslated = false;
+  syncTranslatePopupUI(cur);
+  if (translateStatusLabelEl) translateStatusLabelEl.textContent = 'Original restaurado';
+}
+
+function translateActivePage(e) {
+  if (e && e.stopPropagation) e.stopPropagation();
+  const cur = getActiveTab();
+  if (!cur || !cur.url || cur.url.startsWith('vortex://') || cur.url.startsWith('about:')) {
+    showToastNotification('ℹ️', 'Google Translate', 'Abra uma página da web para usar o tradutor.');
+    return;
+  }
+
+  const isAlreadyOpen = translatePopupEl?.classList.contains('open');
+  closeAllPopups(translatePopupEl);
+
+  if (isAlreadyOpen) {
+    translatePopupEl?.classList.remove('open');
+    return;
+  }
+
+  positionTranslatePopup();
+  translatePopupEl?.classList.add('open');
+  translateLangMenuEl?.classList.remove('open');
+  syncTranslatePopupUI(cur);
+
+  // Igual ao Google Chrome: ao abrir o ícone de tradução pela primeira vez na página, já traduz automaticamente para português
+  if (!cur.isTranslated) {
+    performInPlaceTranslation(currentTargetLangCode);
+  }
 }
 
 btnTranslatePageEl?.addEventListener('click', translateActivePage);
+translatePopupEl?.addEventListener('click', (e) => e.stopPropagation());
+
+btnTranslateOriginalEl?.addEventListener('click', () => {
+  restoreOriginalPageLanguage();
+});
+
+btnTranslateTargetEl?.addEventListener('click', () => {
+  performInPlaceTranslation(currentTargetLangCode);
+});
+
+btnTranslateMoreLangsEl?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  translateLangMenuEl?.classList.toggle('open');
+});
+
+document.querySelectorAll('.chrome-tr-lang-option').forEach((opt) => {
+  opt.addEventListener('click', () => {
+    document.querySelectorAll('.chrome-tr-lang-option').forEach((o) => o.classList.remove('active'));
+    opt.classList.add('active');
+    currentTargetLangCode = opt.getAttribute('data-lang') || 'pt';
+    currentTargetLangLabel = opt.getAttribute('data-label') || 'português';
+    if (btnTranslateTargetEl) btnTranslateTargetEl.textContent = currentTargetLangLabel;
+    translateLangMenuEl?.classList.remove('open');
+    performInPlaceTranslation(currentTargetLangCode);
+  });
+});
+
+btnTranslateCloseEl?.addEventListener('click', () => {
+  translatePopupEl?.classList.remove('open');
+});
+
 document.getElementById('ctx-translate-page')?.addEventListener('click', () => {
   closeAllMenus();
-  translateActivePage();
+  positionTranslatePopup();
+  translatePopupEl?.classList.add('open');
+  performInPlaceTranslation(currentTargetLangCode);
 });
 
 // ── 4. Otimizador de Memória RAM, Cores de Abas e Hover Preview ──────

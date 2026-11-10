@@ -1211,6 +1211,96 @@ ipcMain.handle('read-text-file-preview', async (event, filePath) => {
   }
 });
 
+// IPC para Tradução Nativa In-Place estilo Google Chrome (sem sair da URL e sem quebrar o site)
+function fetchGoogleTranslateChunk(textChunk, targetLang = 'pt') {
+  return new Promise((resolve) => {
+    const https = require('https');
+    const pathUrl = `/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(targetLang)}&dt=t&q=${encodeURIComponent(textChunk)}`;
+    const req = https.request(
+      {
+        hostname: 'translate.googleapis.com',
+        path: pathUrl,
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36'
+        }
+      },
+      (res) => {
+        let raw = '';
+        res.on('data', (c) => (raw += c));
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && Array.isArray(parsed[0])) {
+              const fullTranslated = parsed[0].map((part) => (part && part[0]) ? part[0] : '').join('');
+              const detectedLang = parsed[2] || 'auto';
+              resolve({ ok: true, text: fullTranslated, detectedLang });
+              return;
+            }
+          } catch (e) {}
+          resolve({ ok: false, text: textChunk, detectedLang: 'auto' });
+        });
+      }
+    );
+    req.on('error', () => resolve({ ok: false, text: textChunk, detectedLang: 'auto' }));
+    req.setTimeout(8000, () => {
+      req.destroy();
+      resolve({ ok: false, text: textChunk, detectedLang: 'auto' });
+    });
+    req.end();
+  });
+}
+
+ipcMain.handle('translate-batch', async (event, { texts, targetLang = 'pt' }) => {
+  if (!isTrustedSender(event)) return { success: false, translations: [] };
+  if (!Array.isArray(texts) || texts.length === 0) return { success: true, translations: [] };
+
+  try {
+    // Agrupa textos em lotes de até ~1400 caracteres separados por quebra de linha
+    const batches = [];
+    let currentBatch = [];
+    let currentLen = 0;
+
+    for (let i = 0; i < texts.length; i++) {
+      const cleanLine = String(texts[i] || '').replace(/[\r\n]+/g, ' ').trim();
+      if (currentLen + cleanLine.length > 1400 && currentBatch.length > 0) {
+        batches.push(currentBatch);
+        currentBatch = [];
+        currentLen = 0;
+      }
+      currentBatch.push({ index: i, text: cleanLine });
+      currentLen += cleanLine.length + 1;
+    }
+    if (currentBatch.length > 0) batches.push(currentBatch);
+
+    const results = new Array(texts.length);
+    let detectedSourceLang = 'auto';
+
+    // Processa em paralelo (até 5 lotes por vez para máxima velocidade)
+    const CONCURRENCY = 5;
+    for (let b = 0; b < batches.length; b += CONCURRENCY) {
+      const slice = batches.slice(b, b + CONCURRENCY);
+      await Promise.all(
+        slice.map(async (batch) => {
+          const joined = batch.map((item) => item.text).join('\n');
+          const res = await fetchGoogleTranslateChunk(joined, targetLang);
+          if (res.detectedLang && res.detectedLang !== 'auto') {
+            detectedSourceLang = res.detectedLang;
+          }
+          const splitLines = res.text.split('\n');
+          for (let j = 0; j < batch.length; j++) {
+            results[batch[j].index] = (splitLines[j] !== undefined ? splitLines[j] : batch[j].text).trim();
+          }
+        })
+      );
+    }
+
+    return { success: true, translations: results, detectedLang: detectedSourceLang };
+  } catch (err) {
+    return { success: false, error: err.message, translations: texts };
+  }
+});
+
 // Limpeza de rastros ao fechar / modo privado
 ipcMain.on('clear-browsing-data', async (event) => {
   await session.defaultSession.clearStorageData({

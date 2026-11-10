@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('vortexAPI', {
   getDownloadsPath: () => ipcRenderer.invoke('get-downloads-path'),
   extractZip: (zipPath) => ipcRenderer.invoke('extract-zip', zipPath),
   readTextFilePreview: (filePath) => ipcRenderer.invoke('read-text-file-preview', filePath),
+  translateBatch: (data) => ipcRenderer.invoke('translate-batch', data),
   setAdblockEnabled: (enabled) => ipcRenderer.send('set-adblock-enabled', enabled),
   // Módulo de Gerenciamento de Senhas e Sincronização com Email
   getSavedPasswords: () => ipcRenderer.invoke('get-saved-passwords'),

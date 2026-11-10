@@ -177,6 +177,30 @@
       </button>
     </div>
 
+    <!-- Popup de Tradução Nativo (Idêntico ao Google Chrome) -->
+    <div class="chrome-translate-popup" id="translatePopup">
+      <div class="chrome-translate-top">
+        <div class="chrome-translate-tabs">
+          <button type="button" class="chrome-tr-tab active" id="btnTranslateOriginal">Idioma detectado</button>
+          <button type="button" class="chrome-tr-tab" id="btnTranslateTarget">português</button>
+        </div>
+        <div class="chrome-translate-actions">
+          <button type="button" class="chrome-tr-icon-btn" id="btnTranslateMoreLangs" title="Escolher outro idioma" aria-label="Escolher outro idioma">⋮</button>
+          <button type="button" class="chrome-tr-icon-btn" id="btnTranslateClose" title="Fechar" aria-label="Fechar">✕</button>
+        </div>
+      </div>
+      <div class="chrome-translate-lang-menu" id="translateLangMenu">
+        <div class="chrome-tr-lang-option active" data-lang="pt" data-label="português">🇧🇷 Português</div>
+        <div class="chrome-tr-lang-option" data-lang="en" data-label="inglês">🇺🇸 Inglês</div>
+        <div class="chrome-tr-lang-option" data-lang="es" data-label="espanhol">🇪🇸 Espanhol</div>
+        <div class="chrome-tr-lang-option" data-lang="fr" data-label="francês">🇫🇷 Francês</div>
+      </div>
+      <div class="chrome-translate-footer">
+        <span class="chrome-translate-brand">Google Translate</span>
+        <span class="chrome-translate-status" id="translateStatusLabel"></span>
+      </div>
+    </div>
+
     <!-- Popup de Favorito (igual Chrome) -->
     <div class="bookmark-popup" id="bookmarkPopup">
       <div class="bookmark-popup-header">
