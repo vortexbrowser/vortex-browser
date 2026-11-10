@@ -146,7 +146,27 @@ try {
 // ── Cofre Seguro de Senhas e Perfil de Sincronização ───────────────────
 const PASSWORDS_FILE = path.join(vortexDataDir, 'vortex-passwords.enc');
 const PROFILE_FILE = path.join(vortexDataDir, 'vortex-profile.json');
-const CRYPTO_KEY = crypto.scryptSync('VORTEX_BROWSER_VAULT_KEY_2026', 'vortex-salt', 32);
+const VAULT_SALT_FILE = path.join(vortexDataDir, 'vortex-vault.salt');
+const LEGACY_CRYPTO_KEY = crypto.scryptSync('VORTEX_BROWSER_VAULT_KEY_2026', 'vortex-salt', 32);
+
+function getMachineVaultKey() {
+  try {
+    let saltHex = '';
+    if (fs.existsSync(VAULT_SALT_FILE)) {
+      saltHex = fs.readFileSync(VAULT_SALT_FILE, 'utf8').trim();
+    }
+    if (!saltHex || saltHex.length < 32) {
+      saltHex = crypto.randomBytes(32).toString('hex');
+      fs.writeFileSync(VAULT_SALT_FILE, saltHex, 'utf8');
+    }
+    const os = require('os');
+    const machineId = `${os.hostname()}_${os.userInfo().username}_VORTEX_VAULT_2026`;
+    return crypto.scryptSync(machineId, saltHex, 32);
+  } catch (e) {
+    return LEGACY_CRYPTO_KEY;
+  }
+}
+const CRYPTO_KEY = getMachineVaultKey();
 
 function encryptData(text) {
   try {
@@ -159,13 +179,13 @@ function encryptData(text) {
     console.warn('safeStorage indisponível, usando AES-256 fallback:', e.message);
   }
 
-  // 2. Fallback seguro com AES-256-CBC
+  // 2. Fallback seguro com AES-256-CBC e Salt único por máquina
   try {
     const iv = crypto.randomBytes(16);
     const cipher = crypto.createCipheriv('aes-256-cbc', CRYPTO_KEY, iv);
     let encrypted = cipher.update(text, 'utf8', 'hex');
     encrypted += cipher.final('hex');
-    return 'aes:' + iv.toString('hex') + ':' + encrypted;
+    return 'aes2:' + iv.toString('hex') + ':' + encrypted;
   } catch (e) {
     return text;
   }
@@ -187,6 +207,20 @@ function decryptData(text) {
     }
   }
 
+  // Formato AES2 (chave com salt único por máquina)
+  if (text.startsWith('aes2:')) {
+    try {
+      const parts = text.slice(5).split(':');
+      if (parts.length === 2) {
+        const iv = Buffer.from(parts[0], 'hex');
+        const decipher = crypto.createDecipheriv('aes-256-cbc', CRYPTO_KEY, iv);
+        let decrypted = decipher.update(parts[1], 'hex', 'utf8');
+        decrypted += decipher.final('utf8');
+        return decrypted;
+      }
+    } catch (e) {}
+  }
+
   // Formato com prefixo 'aes:' ou legado 'iv:ciphertext'
   let rawText = text;
   if (rawText.startsWith('aes:')) {
@@ -197,7 +231,7 @@ function decryptData(text) {
     const parts = rawText.split(':');
     if (parts.length !== 2) return rawText;
     const iv = Buffer.from(parts[0], 'hex');
-    const decipher = crypto.createDecipheriv('aes-256-cbc', CRYPTO_KEY, iv);
+    const decipher = crypto.createDecipheriv('aes-256-cbc', LEGACY_CRYPTO_KEY, iv);
     let decrypted = decipher.update(parts[1], 'hex', 'utf8');
     decrypted += decipher.final('utf8');
     return decrypted;
@@ -345,7 +379,37 @@ const TRACKER_BLOCK_LIST = [
   '*://*.coinhive.com/*',
   '*://*.coin-hive.com/*',
   '*://*.crypto-loot.com/*',
-  '*://*.cryptoloot.pro/*'
+  '*://*.cryptoloot.pro/*',
+  // Telemetria adicional, Fingerprinting & Adware Networks
+  '*://*.clarity.ms/*',
+  '*://*.fullstory.com/*',
+  '*://*.mouseflow.com/*',
+  '*://*.luckyorange.com/*',
+  '*://*.smartlook.com/*',
+  '*://*.inspectlet.com/*',
+  '*://*.amplitude.com/*',
+  '*://*.mixpanel.com/*',
+  '*://*.segment.io/*',
+  '*://*.segment.com/*',
+  '*://*.NewRelic.com/*',
+  '*://*.nr-data.net/*',
+  '*://*.bugsnag.com/*',
+  '*://*.omtrdc.net/*',
+  '*://*.demdex.net/*',
+  '*://*.2o7.net/*',
+  '*://*.bluekai.com/*',
+  '*://*.krxd.net/*',
+  '*://*.exelator.com/*',
+  '*://*.tapad.com/*',
+  '*://*.bidswitch.net/*',
+  '*://*.lijit.com/*',
+  '*://*.sharethrough.com/*',
+  '*://*.teads.tv/*',
+  '*://*.moatads.com/*',
+  '*://*.adsafeprotected.com/*',
+  '*://*.doubleverify.com/*',
+  '*://*.clickadu.com/*',
+  '*://*.hilltopads.net/*'
 ];
 
 let adBlockStats = { blockedCount: 0, enabled: true };
@@ -1047,6 +1111,103 @@ ipcMain.on('open-path', (event, fullPath) => {
   if (!isTrustedSender(event)) return;
   if (fullPath && fs.existsSync(fullPath)) {
     shell.openPath(fullPath);
+  }
+});
+
+// IPC para descompactar arquivo .ZIP automaticamente (Super Download Manager / CNES TXT)
+ipcMain.handle('extract-zip', async (event, zipFilePath) => {
+  if (!isTrustedSender(event)) return { success: false, error: 'Acesso negado' };
+  if (!zipFilePath || !fs.existsSync(zipFilePath)) {
+    return { success: false, error: 'Arquivo ZIP não encontrado no disco.' };
+  }
+  try {
+    const ext = path.extname(zipFilePath).toLowerCase();
+    const baseName = path.basename(zipFilePath, ext);
+    const parentDir = path.dirname(zipFilePath);
+    const targetFolder = path.join(parentDir, baseName);
+
+    if (!fs.existsSync(targetFolder)) {
+      fs.mkdirSync(targetFolder, { recursive: true });
+    }
+
+    const { execFile } = require('child_process');
+    await new Promise((resolve, reject) => {
+      execFile(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          `Expand-Archive -LiteralPath '${zipFilePath.replace(/'/g, "''")}' -DestinationPath '${targetFolder.replace(/'/g, "''")}' -Force`
+        ],
+        { timeout: 60000 },
+        (err) => {
+          if (err) reject(err);
+          else resolve();
+        }
+      );
+    });
+
+    // Lista arquivos extraídos para retorno rápido
+    let extractedFiles = [];
+    try {
+      extractedFiles = fs.readdirSync(targetFolder).map(f => ({
+        name: f,
+        path: path.join(targetFolder, f),
+        size: fs.statSync(path.join(targetFolder, f)).size
+      }));
+    } catch (e) {}
+
+    shell.openPath(targetFolder);
+    return { success: true, folderPath: targetFolder, files: extractedFiles };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// IPC para ler prévia de arquivo TXT/CSV (Visualizador de Tabelas CNES/DATASUS)
+ipcMain.handle('read-text-file-preview', async (event, filePath) => {
+  if (!isTrustedSender(event)) return { success: false, error: 'Acesso negado' };
+  try {
+    let targetPath = filePath;
+    if (!targetPath) {
+      const win = BrowserWindow.fromWebContents(event.sender) || getActiveWindow();
+      const chosen = dialog.showOpenDialogSync(win, {
+        title: 'Abrir Arquivo TXT / CSV no Visualizador Vortex',
+        defaultPath: app.getPath('downloads'),
+        properties: ['openFile'],
+        filters: [
+          { name: 'Arquivos de Dados (TXT, CSV, LOG, DBC)', extensions: ['txt', 'csv', 'tsv', 'log', 'dat', 'ini', 'json', 'xml'] },
+          { name: 'Todos os Arquivos', extensions: ['*'] }
+        ]
+      });
+      if (!chosen || !chosen.length) return { success: false, canceled: true };
+      targetPath = chosen[0];
+    }
+
+    if (!fs.existsSync(targetPath)) {
+      return { success: false, error: 'Arquivo não encontrado.' };
+    }
+
+    const stats = fs.statSync(targetPath);
+    // Lê até os primeiros 256 KB para visualização ultrarrápida sem travar a RAM
+    const maxBytes = Math.min(stats.size, 256 * 1024);
+    const fd = fs.openSync(targetPath, 'r');
+    const buffer = Buffer.alloc(maxBytes);
+    fs.readSync(fd, buffer, 0, maxBytes, 0);
+    fs.closeSync(fd);
+
+    const content = buffer.toString('latin1'); // CNES/DATASUS usa ISO-8859-1 / latin1 ou UTF-8
+    return {
+      success: true,
+      fileName: path.basename(targetPath),
+      filePath: targetPath,
+      totalSize: stats.size,
+      truncated: stats.size > maxBytes,
+      content
+    };
+  } catch (err) {
+    return { success: false, error: err.message };
   }
 });
 
@@ -1942,6 +2103,18 @@ ipcMain.handle('install-update', () => {
 
 app.whenReady().then(() => {
   if (!gotTheLock) return;
+
+  // DNS-over-HTTPS (DoH) automático com Cloudflare Security & Quad9 para proteção contra DNS Spoofing e Phishing
+  try {
+    app.configureHostResolver({
+      secureDnsMode: 'automatic',
+      secureDnsServers: [
+        'https://cloudflare-dns.com/dns-query',
+        'https://dns.quad9.net/dns-query'
+      ]
+    });
+  } catch (e) {}
+
   initDefaultSession();
   createWindow();
   setupAutoUpdater();

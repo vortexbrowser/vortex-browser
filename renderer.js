@@ -125,10 +125,10 @@ const btnMaximizeEl = document.getElementById('btnMaximize');
 function setMaximizeState(isMaximized) {
   if (!btnMaximizeEl) return;
   if (isMaximized) {
-    btnMaximizeEl.textContent = '🗗';
+    btnMaximizeEl.innerHTML = `<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1.5" y="3" width="5.5" height="5.5" rx="0.8"></rect><path d="M3 3V1.5h5.5V7H7"></path></svg>`;
     btnMaximizeEl.title = 'Restaurar';
   } else {
-    btnMaximizeEl.textContent = '🗖';
+    btnMaximizeEl.innerHTML = `<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1.5" y="1.5" width="7" height="7" rx="1"></rect></svg>`;
     btnMaximizeEl.title = 'Maximizar';
   }
 }
@@ -1095,18 +1095,48 @@ window.vortexAPI.onDownloadCompleted((data) => {
   if (toast) {
     if (data.state === 'completed') {
       toast.style.borderColor = 'var(--accent-emerald)';
+      const lowerName = (data.fileName || '').toLowerCase();
+      const isZip = lowerName.endsWith('.zip');
+      const isTxtOrCsv = lowerName.endsWith('.txt') || lowerName.endsWith('.csv') || lowerName.endsWith('.log');
+
       toast.innerHTML = `
         <span style="font-size:20px">✅</span>
         <div style="flex:1">
           <div style="font-weight:600">Download concluído!</div>
-          <div class="download-toast-progress">${data.fileName} salvo na pasta Downloads.</div>
-          ${data.savePath ? `<button class="btn-open-folder" style="margin-top:6px;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);color:var(--text-main,#fff);border-radius:4px;padding:3px 8px;font-size:11px;cursor:pointer;">📂 Abrir pasta</button>` : ''}
+          <div class="download-toast-progress">${data.fileName} salvo com sucesso.</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
+            ${data.savePath ? `<button class="btn-open-folder" style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);color:var(--text-main,#fff);border-radius:4px;padding:3px 8px;font-size:11px;cursor:pointer;">📂 Abrir pasta</button>` : ''}
+            ${(data.savePath && isZip) ? `<button class="btn-extract-zip" style="background:rgba(16,185,129,0.2);border:1px solid rgba(16,185,129,0.5);color:#34d399;border-radius:4px;padding:3px 8px;font-size:11px;font-weight:600;cursor:pointer;">📦 Extrair ZIP</button>` : ''}
+            ${(data.savePath && isTxtOrCsv) ? `<button class="btn-preview-txt" style="background:rgba(56,189,248,0.2);border:1px solid rgba(56,189,248,0.5);color:#38bdf8;border-radius:4px;padding:3px 8px;font-size:11px;font-weight:600;cursor:pointer;">📊 Ver Tabela TXT</button>` : ''}
+          </div>
         </div>
       `;
       if (data.savePath) {
         toast.querySelector('.btn-open-folder')?.addEventListener('click', (e) => {
           e.stopPropagation();
           window.vortexAPI.showItemInFolder(data.savePath);
+        });
+        toast.querySelector('.btn-extract-zip')?.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const btn = e.currentTarget;
+          btn.textContent = '⏳ Extraindo...';
+          btn.disabled = true;
+          const res = await window.vortexAPI.extractZip(data.savePath);
+          if (res && res.success) {
+            showToastNotification('📦', 'ZIP Extraído com Sucesso!', `${res.files?.length || 0} arquivo(s) extraídos e pasta aberta.`);
+            const firstTxt = (res.files || []).find(f => f.name.toLowerCase().endsWith('.txt') || f.name.toLowerCase().endsWith('.csv'));
+            if (firstTxt && typeof openTxtViewerWithFile === 'function') {
+              openTxtViewerWithFile(firstTxt.path);
+            }
+          } else {
+            showToastNotification('⚠️', 'Erro ao extrair ZIP', res?.error || 'Falha na descompactação.', true);
+          }
+        });
+        toast.querySelector('.btn-preview-txt')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (typeof openTxtViewerWithFile === 'function') {
+            openTxtViewerWithFile(data.savePath);
+          }
         });
       }
     } else {
@@ -5129,5 +5159,452 @@ function initHomeWidgets() {
 }
 
 initHomeWidgets();
+
+// ══════════════════════════════════════════════════════════════════════════
+// FASE 4: ENTERPRISE UPGRADE (100% GRATUITO)
+// 1. Barra Lateral Vortex (IA Gratuita, Notas Rápidas, Central CNES, RAM)
+// 2. Split View (Tela Dividida Lado a Lado)
+// 3. Tradutor de Páginas 1-Clique para Português
+// 4. Tab Hover Preview Card, Cores de Abas e Suspensão Manual de RAM
+// 5. Visualizador Rápido de Arquivos TXT / CSV (CNES / DATASUS)
+// ══════════════════════════════════════════════════════════════════════════
+
+// ── 1. Barra Lateral (Sidebar) & IA Gratuita ────────────────────────
+const vortexSidebarEl = document.getElementById('vortexSidebar');
+const btnToggleSidebarEl = document.getElementById('btnToggleSidebar');
+const btnCloseSidebarEl = document.getElementById('btnCloseSidebar');
+
+function toggleVortexSidebar(forceOpenPanel = null) {
+  if (!vortexSidebarEl) return;
+  if (forceOpenPanel) {
+    vortexSidebarEl.classList.add('open');
+    btnToggleSidebarEl?.classList.add('active');
+    switchSidebarPanel(forceOpenPanel);
+    return;
+  }
+  const isOpen = vortexSidebarEl.classList.toggle('open');
+  btnToggleSidebarEl?.classList.toggle('active', isOpen);
+  if (isOpen) updateRamStatsInSidebar();
+}
+
+function switchSidebarPanel(panelId) {
+  document.querySelectorAll('.sidebar-rail-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-panel') === panelId);
+  });
+  document.querySelectorAll('.sidebar-panel').forEach(panel => {
+    panel.classList.toggle('active', panel.id === `sidebarPanel-${panelId}`);
+  });
+  if (panelId === 'ram') updateRamStatsInSidebar();
+}
+
+btnToggleSidebarEl?.addEventListener('click', () => toggleVortexSidebar());
+btnCloseSidebarEl?.addEventListener('click', () => {
+  vortexSidebarEl?.classList.remove('open');
+  btnToggleSidebarEl?.classList.remove('active');
+});
+document.querySelectorAll('[data-close-sidebar="true"]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    vortexSidebarEl?.classList.remove('open');
+    btnToggleSidebarEl?.classList.remove('active');
+  });
+});
+
+document.querySelectorAll('.sidebar-rail-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const panel = btn.getAttribute('data-panel');
+    if (panel) switchSidebarPanel(panel);
+  });
+});
+
+// Atalhos Diretos CNES / DATASUS na Sidebar
+document.querySelectorAll('.cnes-shortcut-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const targetUrl = btn.getAttribute('data-url');
+    if (targetUrl) createTab(targetUrl);
+  });
+});
+
+document.getElementById('btnOpenDownloadsFolderSidebar')?.addEventListener('click', () => {
+  window.vortexAPI?.showItemInFolder('');
+});
+
+// Bloco de Notas Rápidas Persistente
+const sidebarQuickNotesEl = document.getElementById('sidebarQuickNotes');
+const notesSavedStatusEl = document.getElementById('notesSavedStatus');
+if (sidebarQuickNotesEl) {
+  sidebarQuickNotesEl.value = localStorage.getItem('vortex-quick-notes') || '';
+  sidebarQuickNotesEl.addEventListener('input', () => {
+    localStorage.setItem('vortex-quick-notes', sidebarQuickNotesEl.value);
+    if (notesSavedStatusEl) {
+      notesSavedStatusEl.textContent = '💾 Salvando...';
+      setTimeout(() => { notesSavedStatusEl.textContent = '✓ Salvo automaticamente'; }, 400);
+    }
+  });
+}
+
+document.getElementById('btnCopyNotes')?.addEventListener('click', () => {
+  if (sidebarQuickNotesEl && sidebarQuickNotesEl.value) {
+    navigator.clipboard.writeText(sidebarQuickNotesEl.value).then(() => {
+      showToastNotification('📋', 'Notas Copiadas', 'Texto copiado para a área de transferência.');
+    });
+  }
+});
+
+// Assistente de IA Gratuito (Pollinations Open AI Text API — 100% Free & Sem Chave)
+const sidebarAiMessagesEl = document.getElementById('sidebarAiMessages');
+const sidebarAiInputEl = document.getElementById('sidebarAiInput');
+const btnSidebarAiSendEl = document.getElementById('btnSidebarAiSend');
+
+function appendAiMessage(text, isUser = false) {
+  if (!sidebarAiMessagesEl) return null;
+  const div = document.createElement('div');
+  div.className = `ai-msg ${isUser ? 'ai-msg-user' : 'ai-msg-bot'}`;
+  div.textContent = text;
+  sidebarAiMessagesEl.appendChild(div);
+  sidebarAiMessagesEl.scrollTop = sidebarAiMessagesEl.scrollHeight;
+  return div;
+}
+
+async function askVortexFreeAI(promptText) {
+  const q = (promptText || '').trim();
+  if (!q) return;
+  appendAiMessage(q, true);
+  if (sidebarAiInputEl) sidebarAiInputEl.value = '';
+
+  const loadingMsg = appendAiMessage('⏳ Pensando...', false);
+  try {
+    const systemPrompt = 'Você é a IA assistente oficial do navegador Vortex Browser. Responda sempre em português do Brasil de maneira clara, direta e útil.';
+    const url = `https://text.pollinations.ai/${encodeURIComponent(systemPrompt + '\n\nPergunta: ' + q)}?model=openai`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('Servidor de IA ocupado no momento.');
+    const reply = await res.text();
+    if (loadingMsg) loadingMsg.textContent = reply.trim() || 'Não consegui gerar uma resposta.';
+  } catch (err) {
+    if (loadingMsg) loadingMsg.textContent = '⚠️ Não foi possível conectar ao servidor gratuito de IA agora. Verifique sua conexão e tente novamente.';
+  }
+}
+
+btnSidebarAiSendEl?.addEventListener('click', () => askVortexFreeAI(sidebarAiInputEl?.value));
+sidebarAiInputEl?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') askVortexFreeAI(sidebarAiInputEl.value);
+});
+
+document.getElementById('btnAiClearChat')?.addEventListener('click', () => {
+  if (sidebarAiMessagesEl) {
+    sidebarAiMessagesEl.innerHTML = `<div class="ai-msg ai-msg-bot">Conversa limpa! Como posso ajudar você agora?</div>`;
+  }
+});
+
+document.getElementById('btnAiSummarizePage')?.addEventListener('click', async () => {
+  const cur = getActiveTab();
+  if (!cur || !cur.webview || !cur.url || cur.url.startsWith('vortex://') || cur.url.startsWith('about:')) {
+    showToastNotification('ℹ️', 'IA Vortex', 'Abra uma página web primeiro para resumir seu conteúdo.');
+    return;
+  }
+  try {
+    const pageText = await cur.webview.executeJavaScript(`(document.body.innerText || '').slice(0, 3500)`);
+    askVortexFreeAI(`Resuma os principais pontos desta página (${cur.title || cur.url}):\n\n${pageText}`);
+  } catch (e) {
+    askVortexFreeAI(`Explique sobre o site: ${cur.url}`);
+  }
+});
+
+document.getElementById('btnAiExplainPage')?.addEventListener('click', async () => {
+  const cur = getActiveTab();
+  if (!cur || !cur.webview || !cur.url || cur.url.startsWith('vortex://') || cur.url.startsWith('about:')) {
+    showToastNotification('ℹ️', 'IA Vortex', 'Abra uma página web primeiro para explicar.');
+    return;
+  }
+  try {
+    const pageText = await cur.webview.executeJavaScript(`(document.body.innerText || '').slice(0, 3000)`);
+    askVortexFreeAI(`Explique de forma simples e passo a passo o conteúdo desta página (${cur.title || cur.url}):\n\n${pageText}`);
+  } catch (e) {
+    askVortexFreeAI(`Explique para que serve a página: ${cur.url}`);
+  }
+});
+
+// ── 2. Split View (Tela Dividida Lado a Lado) ────────────────────────
+let splitViewActive = false;
+let splitSecondaryTabId = null;
+const btnSplitViewEl = document.getElementById('btnSplitView');
+
+function disableSplitView() {
+  splitViewActive = false;
+  splitSecondaryTabId = null;
+  viewsContainerEl?.classList.remove('split-view-active');
+  btnSplitViewEl?.classList.remove('active');
+  tabs.forEach(t => {
+    if (t.webview) {
+      t.webview.classList.remove('split-primary', 'split-secondary');
+      if (t.id !== activeTabId) {
+        t.webview.style.display = 'none';
+      }
+    }
+  });
+  updateRamStatsInSidebar();
+}
+
+function enableSplitViewWithTab(secondTabId = null) {
+  const primaryTab = getActiveTab();
+  if (!primaryTab || !primaryTab.webview) {
+    showToastNotification('ℹ️', 'Tela Dividida (Split View)', 'Navegue para um site na aba atual antes de dividir a tela.');
+    return;
+  }
+
+  let secondaryTab = secondTabId ? tabs.find(t => t.id === secondTabId) : null;
+  if (!secondaryTab || secondaryTab.id === primaryTab.id) {
+    secondaryTab = tabs.find(t => t.id !== primaryTab.id && t.webview);
+  }
+
+  if (!secondaryTab) {
+    createTab('https://www.google.com');
+    secondaryTab = getActiveTab();
+    switchTab(primaryTab.id);
+  }
+
+  if (!secondaryTab || !secondaryTab.webview) return;
+
+  splitViewActive = true;
+  splitSecondaryTabId = secondaryTab.id;
+  viewsContainerEl?.classList.add('split-view-active');
+  btnSplitViewEl?.classList.add('active');
+  if (homeViewEl) homeViewEl.style.display = 'none';
+
+  tabs.forEach(t => {
+    if (!t.webview) return;
+    t.webview.classList.remove('split-primary', 'split-secondary');
+    if (t.id === primaryTab.id) {
+      t.webview.classList.add('split-primary');
+      t.webview.style.display = 'flex';
+    } else if (t.id === secondaryTab.id) {
+      if (t.isSuspended) wakeUpSuspendedTab(t);
+      t.webview.classList.add('split-secondary');
+      t.webview.style.display = 'flex';
+    } else {
+      t.webview.style.display = 'none';
+    }
+  });
+
+  showToastNotification('◫', 'Tela Dividida Ativada', `Exibindo "${primaryTab.title || 'Aba 1'}" e "${secondaryTab.title || 'Aba 2'}" lado a lado.`);
+  updateRamStatsInSidebar();
+}
+
+function toggleSplitView(targetSecondTabId = null) {
+  if (splitViewActive && !targetSecondTabId) {
+    disableSplitView();
+    showToastNotification('◫', 'Tela Dividida Desativada', 'Visualização única restaurada.');
+  } else {
+    enableSplitViewWithTab(targetSecondTabId);
+  }
+}
+
+btnSplitViewEl?.addEventListener('click', () => toggleSplitView());
+document.getElementById('btnToggleSplitFromSidebar')?.addEventListener('click', () => toggleSplitView());
+
+document.getElementById('menuSplitTab')?.addEventListener('click', () => {
+  if (contextMenuTargetTabId) {
+    if (contextMenuTargetTabId === activeTabId) {
+      toggleSplitView();
+    } else {
+      enableSplitViewWithTab(contextMenuTargetTabId);
+    }
+  }
+  hideTabContextMenu();
+});
+
+// ── 3. Tradutor de Páginas 1-Clique para Português ───────────────────
+const btnTranslatePageEl = document.getElementById('btnTranslatePage');
+
+function translateActivePage() {
+  const cur = getActiveTab();
+  if (!cur || !cur.url || cur.url.startsWith('vortex://') || cur.url.startsWith('about:')) {
+    showToastNotification('ℹ️', 'Tradutor Vortex', 'Abra uma página da web para traduzir para Português.');
+    return;
+  }
+  const translateUrl = `https://translate.google.com/translate?sl=auto&tl=pt&u=${encodeURIComponent(cur.url)}`;
+  navigateTo(translateUrl);
+  showToastNotification('🌐', 'Traduzindo Página...', 'Carregando tradução automática para Português.');
+}
+
+btnTranslatePageEl?.addEventListener('click', translateActivePage);
+document.getElementById('ctx-translate-page')?.addEventListener('click', () => {
+  closeAllMenus();
+  translateActivePage();
+});
+
+// ── 4. Otimizador de Memória RAM, Cores de Abas e Hover Preview ──────
+const menuSuspendTabEl = document.getElementById('menuSuspendTab');
+const tabHoverPreviewCardEl = document.getElementById('tabHoverPreviewCard');
+const tabPreviewTitleEl = document.getElementById('tabPreviewTitle');
+const tabPreviewDomainEl = document.getElementById('tabPreviewDomain');
+const tabPreviewStatusEl = document.getElementById('tabPreviewStatus');
+
+menuSuspendTabEl?.addEventListener('click', () => {
+  if (contextMenuTargetTabId) {
+    const t = tabs.find(item => item.id === contextMenuTargetTabId);
+    if (t) {
+      if (t.isSuspended) {
+        wakeUpSuspendedTab(t);
+        showToastNotification('⚡', 'Aba Reativada', t.title || t.url);
+      } else if (t.id === activeTabId) {
+        showToastNotification('ℹ️', 'Aba em Uso', 'Mude para outra aba antes de suspender esta, ou clique em Hibernar Inativas.');
+      } else {
+        suspendTab(t);
+        showToastNotification('💤', 'Aba Suspensa (Economia de RAM)', `${t.title || 'Aba'} entrou em modo de baixo consumo.`);
+      }
+      updateRamStatsInSidebar();
+    }
+  }
+  hideTabContextMenu();
+});
+
+// Cores personalizadas de abas (Tab Color Labels)
+document.querySelectorAll('.tab-color-dot').forEach(dot => {
+  dot.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const color = dot.getAttribute('data-color') || '';
+    if (contextMenuTargetTabId) {
+      const t = tabs.find(item => item.id === contextMenuTargetTabId);
+      if (t && t.tabEl) {
+        t.colorTag = color;
+        t.tabEl.style.borderTop = color ? `3px solid ${color}` : '';
+      }
+    }
+    hideTabContextMenu();
+  });
+});
+
+// Hover Preview Card nas Abas
+tabsListEl?.addEventListener('mouseover', (e) => {
+  const tabEl = e.target.closest('.tab');
+  if (!tabEl || !tabHoverPreviewCardEl) return;
+  const tabId = tabEl.id.replace('tab-btn-', '');
+  const t = tabs.find(item => item.id === tabId);
+  if (!t) return;
+
+  if (tabPreviewTitleEl) tabPreviewTitleEl.textContent = t.title || 'Nova Aba';
+  if (tabPreviewDomainEl) tabPreviewDomainEl.textContent = t.url || 'vortex://inicio';
+  if (tabPreviewStatusEl) {
+    tabPreviewStatusEl.textContent = t.isSuspended
+      ? '💤 Em repouso (Memória RAM liberada)'
+      : (t.isIncognito ? '🕶️ Sessão Anônima Isolada' : '⚡ Aba ativa na memória');
+  }
+
+  const rect = tabEl.getBoundingClientRect();
+  const left = Math.min(Math.max(8, rect.left), window.innerWidth - 265);
+  tabHoverPreviewCardEl.style.left = `${left}px`;
+  tabHoverPreviewCardEl.classList.add('visible');
+});
+
+tabsListEl?.addEventListener('mouseout', (e) => {
+  if (!e.relatedTarget || !e.relatedTarget.closest?.('.tab')) {
+    tabHoverPreviewCardEl?.classList.remove('visible');
+  }
+});
+
+function updateRamStatsInSidebar() {
+  const openCountEl = document.getElementById('ramOpenTabsCount');
+  const suspCountEl = document.getElementById('ramSuspendedTabsCount');
+  const splitStatusEl = document.getElementById('ramSplitStatusText');
+  const listEl = document.getElementById('sidebarTabsManagerList');
+
+  if (openCountEl) openCountEl.textContent = String(tabs.length);
+  if (suspCountEl) suspCountEl.textContent = String(tabs.filter(t => t.isSuspended).length);
+  if (splitStatusEl) splitStatusEl.textContent = splitViewActive ? 'Ativa (2 Abas)' : 'Desativada';
+
+  if (listEl) {
+    listEl.innerHTML = tabs.map(t => `
+      <div class="sidebar-tab-row">
+        <span class="sidebar-tab-row-title" data-switch-id="${t.id}" title="${escapeHtml(t.url || '')}">
+          ${t.isSuspended ? '💤 ' : '🟢 '}${escapeHtml(t.title || 'Nova Aba')}
+        </span>
+        ${t.id !== activeTabId && !t.isSuspended ? `<button class="sidebar-chip-btn" data-suspend-id="${t.id}" type="button">💤</button>` : ''}
+      </div>
+    `).join('');
+
+    listEl.querySelectorAll('[data-switch-id]').forEach(el => {
+      el.addEventListener('click', () => switchTab(el.getAttribute('data-switch-id')));
+    });
+    listEl.querySelectorAll('[data-suspend-id]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const target = tabs.find(item => item.id === btn.getAttribute('data-suspend-id'));
+        if (target) {
+          suspendTab(target);
+          updateRamStatsInSidebar();
+        }
+      });
+    });
+  }
+}
+
+document.getElementById('btnHibernateInactiveTabs')?.addEventListener('click', () => {
+  let count = 0;
+  tabs.forEach(t => {
+    if (t.id !== activeTabId && !t.isSuspended && t.url && !t.url.startsWith('vortex://')) {
+      suspendTab(t);
+      count++;
+    }
+  });
+  updateRamStatsInSidebar();
+  showToastNotification('💤', 'Otimização de RAM Concluída', count > 0 ? `${count} aba(s) em segundo plano foram hibernadas.` : 'Todas as abas inativas já estão otimizadas.');
+});
+
+// ── 5. Visualizador Rápido de Arquivos TXT / CSV (CNES / DATASUS) ───
+const txtViewerModalEl = document.getElementById('txtViewerModal');
+const txtViewerModalTitleEl = document.getElementById('txtViewerModalTitle');
+const txtViewerContentPreEl = document.getElementById('txtViewerContentPre');
+const txtViewerMetaInfoEl = document.getElementById('txtViewerMetaInfo');
+const txtViewerSearchInputEl = document.getElementById('txtViewerSearchInput');
+let currentTxtViewerFullLines = [];
+
+async function openTxtViewerWithFile(filePath = null) {
+  if (!window.vortexAPI?.readTextFilePreview) return;
+  const res = await window.vortexAPI.readTextFilePreview(filePath);
+  if (!res || res.canceled) return;
+  if (!res.success) {
+    showToastNotification('⚠️', 'Erro ao abrir arquivo', res.error || 'Não foi possível ler o arquivo.', true);
+    return;
+  }
+
+  currentTxtViewerFullLines = (res.content || '').split(/\r?\n/);
+  if (txtViewerModalTitleEl) txtViewerModalTitleEl.textContent = `📊 ${res.fileName}`;
+  if (txtViewerMetaInfoEl) {
+    const kb = (res.totalSize / 1024).toFixed(1);
+    txtViewerMetaInfoEl.textContent = `${currentTxtViewerFullLines.length} linhas | ${kb} KB${res.truncated ? ' (Prévia 256KB)' : ''}`;
+  }
+  if (txtViewerSearchInputEl) txtViewerSearchInputEl.value = '';
+  if (txtViewerContentPreEl) txtViewerContentPreEl.textContent = currentTxtViewerFullLines.slice(0, 1500).join('\n');
+  if (txtViewerModalEl) txtViewerModalEl.style.display = 'flex';
+}
+
+txtViewerSearchInputEl?.addEventListener('input', () => {
+  if (!txtViewerContentPreEl) return;
+  const q = txtViewerSearchInputEl.value.trim().toLowerCase();
+  if (!q) {
+    txtViewerContentPreEl.textContent = currentTxtViewerFullLines.slice(0, 1500).join('\n');
+    return;
+  }
+  const filtered = currentTxtViewerFullLines.filter(line => line.toLowerCase().includes(q));
+  txtViewerContentPreEl.textContent = filtered.slice(0, 1500).join('\n') || `Nenhuma linha encontrada contendo "${txtViewerSearchInputEl.value}".`;
+});
+
+document.getElementById('btnOpenTxtViewer')?.addEventListener('click', () => openTxtViewerWithFile(null));
+document.getElementById('btnOpenAnotherTxtFile')?.addEventListener('click', () => openTxtViewerWithFile(null));
+document.getElementById('btnCloseTxtViewerModal')?.addEventListener('click', () => {
+  if (txtViewerModalEl) txtViewerModalEl.style.display = 'none';
+});
+
+// Adicionar novos comandos na Command Palette (Ctrl+K)
+if (Array.isArray(COMMAND_ACTIONS)) {
+  COMMAND_ACTIONS.push(
+    { id: 'sidebar-ai', title: 'Abrir Assistente de IA Vortex (Gratuito)', category: 'Produtividade', icon: '🤖', hint: 'Sidebar IA', action: () => toggleVortexSidebar('ai') },
+    { id: 'sidebar-cnes', title: 'Central CNES / DATASUS & Extrator ZIP', category: 'Saúde / Automação', icon: '🏥', hint: 'CNES Turbo', action: () => toggleVortexSidebar('cnes') },
+    { id: 'split-view', title: 'Alternar Tela Dividida Lado a Lado (Split View)', category: 'Layout', icon: '◫', hint: 'Duas Abas', action: () => toggleSplitView() },
+    { id: 'translate-page', title: 'Traduzir Página Atual para Português', category: 'Ferramentas', icon: '🌐', hint: 'Google Translate', action: () => translateActivePage() },
+    { id: 'hibernate-tabs', title: 'Hibernar Abas Inativas (Economizar RAM)', category: 'Performance', icon: '💤', hint: 'Memory Saver', action: () => document.getElementById('btnHibernateInactiveTabs')?.click() },
+    { id: 'txt-viewer', title: 'Abrir Visualizador de Arquivos TXT / CSV', category: 'Ferramentas', icon: '📊', hint: 'CNES TXT', action: () => openTxtViewerWithFile(null) }
+  );
+}
+
 
 
