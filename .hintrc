@@ -1,0 +1,23 @@
+{
+  "extends": [
+    "development"
+  ],
+  "hints": {
+    "compat-api/css": [
+      "default",
+      {
+        "ignore": [
+          "-webkit-app-region",
+          "app-region",
+          "scrollbar-width",
+          "-webkit-backdrop-filter"
+        ]
+      }
+    ]
+  },
+  "browserslist": [
+    "Chrome >= 130",
+    "Edge >= 130"
+  ]
+}
+

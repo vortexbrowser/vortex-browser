@@ -149,7 +149,6 @@ body {
   padding-top: 4px;
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: none;
   min-width: 0;
   max-width: calc(100% - 36px);
   -webkit-app-region: drag;
@@ -3903,8 +3902,8 @@ body.incognito-active .address-bar-wrapper {
   flex-direction: column;
   gap: 8px;
   padding: 6px 2px;
-  user-select: text;
   -webkit-user-select: text;
+  user-select: text;
 }
 
 .ai-msg {
@@ -3913,8 +3912,8 @@ body.incognito-active .address-bar-wrapper {
   font-size: 12.5px;
   line-height: 1.45;
   word-break: break-word;
-  user-select: text;
   -webkit-user-select: text;
+  user-select: text;
 }
 
 .ai-msg-bot {
@@ -4055,8 +4054,8 @@ body.incognito-active .address-bar-wrapper {
   font-size: 12.5px;
   line-height: 1.5;
   outline: none;
-  user-select: text;
   -webkit-user-select: text;
+  user-select: text;
 }
 
 .sidebar-notes-textarea:focus {
@@ -4182,6 +4181,7 @@ body.incognito-active .address-bar-wrapper {
   margin-bottom: 3px;
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -4283,8 +4283,8 @@ body.incognito-active .address-bar-wrapper {
   line-height: 1.55;
   color: #e2e8f0;
   white-space: pre;
-  user-select: text;
   -webkit-user-select: text;
+  user-select: text;
 }
 
 
